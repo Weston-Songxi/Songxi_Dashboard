@@ -407,62 +407,69 @@ with tab1:
             if 'SPY' in plot_df:
                 fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='Ref Index', line=dict(color='#BDC3C7', dash='dot')))
             
-            # === [V14.0 智能聚合标记] ===
+            # === [V14.1] 智能聚合 + 彩色卡片 ===
             visible_trades = df_trans_filtered[df_trans_filtered['Ticker'] != 'CASH'].copy()
             if not visible_trades.empty:
                 visible_trades['Date_Norm'] = visible_trades['Date'].dt.normalize()
-                # 按日期分组
-                date_groups = visible_trades.groupby('Date_Norm')
                 nav_lookup = plot_df['松熙组合']
                 
-                for d, group in date_groups:
+                # 按日期聚合
+                for d, group in visible_trades.groupby('Date_Norm'):
                     if d in nav_lookup.index:
                         y_val = nav_lookup.loc[d]
                         
-                        # 检查当日成分
                         has_buy = any('BUY' in a for a in group['Action'])
                         has_sell = any('SELL' in a for a in group['Action'])
                         
-                        # 1. 决定标记样式
+                        # 1. 标记样式 (菱形 vs 方形)
                         if has_buy and has_sell:
-                            color = '#FFD700' # 金色
+                            color = '#FFD700' # 金色混合
                             symbol = 'diamond'
-                            size = 14
-                            main_label = f"<b>Mix:{len(group)}</b>" # 显示混合数量
+                            size = 13
                         elif has_buy:
                             color = '#E74C3C' # 红色
                             symbol = 'square'
-                            size = 12
-                            main_label = f"<b>BUY:{len(group)}</b>" if len(group)>1 else f"<b>{group.iloc[0]['Action'][:3]} {group.iloc[0]['Ticker']}</b>"
+                            size = 11
                         else:
                             color = '#2ECC71' # 绿色
                             symbol = 'square'
-                            size = 12
-                            main_label = f"<b>SELL:{len(group)}</b>" if len(group)>1 else f"<b>{group.iloc[0]['Action'][:3]} {group.iloc[0]['Ticker']}</b>"
+                            size = 11
                         
-                        # 2. 构造富文本 Hover (彩色列表)
-                        hover_lines = []
-                        hover_lines.append(f"<b>📅 {d.strftime('%Y-%m-%d')}</b>")
+                        # 2. 构造静态卡片 (HTML Colored Text)
+                        card_lines = []
+                        hover_lines = [f"<b>📅 {d.strftime('%Y-%m-%d')}</b>"]
+                        
                         for _, row in group.iterrows():
-                            # 严格的颜色控制
-                            text_color = "#E74C3C" if 'BUY' in row['Action'] else "#2ECC71"
+                            # 颜色决定
+                            txt_color = "#D32F2F" if 'BUY' in row['Action'] else "#2E7D32" # 深红/深绿用于白底
+                            line_str = f"<span style='color:{txt_color}'><b>{row['Action'][:3]} {row['Ticker']}</b></span>"
+                            card_lines.append(line_str)
+                            
+                            # Hover 详情
                             hover_lines.append(
-                                f"<span style='color:{text_color}'><b>{row['Action']} {row['Ticker']}</b></span><br>"
-                                f"   💵 ${row['Price'] * abs(row['Shares']):,.0f} | 📝 {row['Reason']}"
+                                f"{line_str}<br>   💵 ${row['Price'] * abs(row['Shares']):,.0f} | 📝 {row['Reason']}"
                             )
+                        
+                        # 卡片内容 (限制3行)
+                        if len(card_lines) > 3:
+                            card_text = "<br>".join(card_lines[:3]) + f"<br><span style='color:black'>...(+{len(card_lines)-3})</span>"
+                        else:
+                            card_text = "<br>".join(card_lines)
+                            
                         hover_content = "<br>".join(hover_lines)
                         
-                        # 3. 绘图
                         fig_nav.add_trace(go.Scatter(
                             x=[d], y=[y_val], mode='markers', name='Trade',
                             marker=dict(symbol=symbol, size=size, color=color, line=dict(width=1, color='white')),
-                            showlegend=False, 
-                            hovertext=hover_content, hoverinfo='text'
+                            showlegend=False, hovertext=hover_content, hoverinfo='text'
                         ))
+                        
                         fig_nav.add_annotation(
-                            x=d, y=y_val, text=main_label, showarrow=True, arrowhead=0, arrowsize=1,
-                            arrowwidth=1, arrowcolor=color, ax=0, ay=-35, bgcolor="white",
-                            bordercolor=color, borderwidth=1, borderpad=4, font=dict(size=10, color="black"), opacity=0.9
+                            x=d, y=y_val, text=card_text, 
+                            showarrow=True, arrowhead=0, arrowsize=1, arrowwidth=1, arrowcolor=color,
+                            ax=0, ay=-35, 
+                            bgcolor="white", bordercolor=color, borderwidth=1, borderpad=4,
+                            font=dict(size=10, color="black"), opacity=0.9
                         )
             
             fig_nav.update_layout(height=480, margin=dict(l=20, r=20, t=30, b=20), legend=dict(orientation="h", y=1.02, x=0), hovermode="x unified")
