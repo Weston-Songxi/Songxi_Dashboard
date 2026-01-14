@@ -18,20 +18,37 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. CSS 样式 (保持不变)
+# 2. CSS 样式 (保持 V13 布局)
 # ==========================================
 st.markdown("""
     <style>
     .block-container { padding-top: 1rem; padding-bottom: 3rem; }
-    .header-wrapper { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 30px; width: 100%; margin-bottom: 10px; border-bottom: 1px solid #f0f0f0; padding-bottom: 15px; padding-right: 60px; }
+    
+    /* Header 布局 */
+    .header-wrapper {
+        display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
+        flex-wrap: wrap; gap: 30px; width: 100%; margin-bottom: 10px;
+        border-bottom: 1px solid #f0f0f0; padding-bottom: 15px; padding-right: 60px;
+    }
     .header-left { flex-shrink: 0; max-width: 100%; }
-    .main-title { font-size: 2.4rem; font-weight: 800; color: #2c3e50; margin: 0; line-height: 1.1; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; white-space: nowrap; }
+    .main-title {
+        font-size: 2.4rem; font-weight: 800; color: #2c3e50; margin: 0; line-height: 1.1;
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; white-space: nowrap;
+    }
     @media (max-width: 800px) { .main-title { white-space: normal; font-size: 2rem; } }
     .sub-info { font-size: 0.95rem; color: #7f8c8d; margin-top: 5px; font-weight: 400; }
+    
     .header-right { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-    .kpi-box { border: 1px solid #e1e4e8; border-radius: 8px; padding: 0 15px; min-width: 100px; height: 75px; display: flex; flex-direction: column; justify-content: center; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.03); transition: all 0.3s ease; position: relative; overflow: hidden; }
+    
+    /* KPI 卡片 */
+    .kpi-box {
+        border: 1px solid #e1e4e8; border-radius: 8px; padding: 0 15px; min-width: 100px; height: 75px;
+        display: flex; flex-direction: column; justify-content: center; align-items: center;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.03); transition: all 0.3s ease; position: relative; overflow: hidden;
+    }
     .kpi-label { font-size: 0.85rem; margin-bottom: 3px; font-weight: 600; z-index: 2; }
     .kpi-value { font-size: 1.35rem; font-weight: 700; line-height: 1.1; white-space: nowrap; z-index: 2; }
+    
     div.stRadio > div { display: flex; gap: 0px; align-items: center; }
     div.stRadio > div label { margin-right: 15px; cursor: pointer; }
     .plotly-notifier { display: none; }
@@ -39,44 +56,39 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 核心：Google Sheets 连接 (V13.3 缓存优化)
+# 3. Google Sheets 连接
 # ==========================================
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
-    """读取数据 - 引入缓存防止 429 错误"""
+    """读取数据 (缓存10分钟)"""
     try:
-        # [修改点] ttl=600 表示缓存 600秒(10分钟)。
-        # 这期间如果再次刷新页面，Streamlit 会直接用内存数据，不再请求 Google API。
-        df = conn.read(ttl=600)
-        
+        df = conn.read(ttl=600) 
         if len(df) == 0:
             return pd.DataFrame(columns=['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason'])
-            
-        # 数据清洗
+        
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df = df.dropna(subset=['Date']) # 剔除无效行
+        df = df.dropna(subset=['Date'])
         df['Shares'] = pd.to_numeric(df['Shares'], errors='coerce').fillna(0)
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
         df['Ticker'] = df['Ticker'].astype(str).str.upper().str.strip()
         return df
     except Exception as e:
         if "429" in str(e):
-            st.warning("⚠️ 触发 Google API 频率限制，已显示缓存数据或空数据。请等待 1 分钟后再尝试刷新。")
+            st.warning("⚠️ 触发API频率限制，显示缓存数据。")
         else:
             st.error(f"数据读取错误: {str(e)}")
         return pd.DataFrame(columns=['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason'])
 
 def save_transaction(new_row_dict):
-    """保存数据"""
+    """写入数据"""
     try:
-        # 写入前必须强制读取最新数据 (ttl=0)，防止覆盖他人修改
         current_df = conn.read(ttl=0)
         new_row_df = pd.DataFrame([new_row_dict])
         updated_df = pd.concat([current_df, new_row_df], ignore_index=True)
         conn.update(data=updated_df)
-        st.cache_data.clear() # [关键] 写入成功后清除缓存，确保立刻看到新数据
+        st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"写入失败: {e}")
@@ -87,7 +99,7 @@ def clear_all_data():
     try:
         empty_df = pd.DataFrame(columns=['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason'])
         conn.update(data=empty_df)
-        st.cache_data.clear() # 清除缓存
+        st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"清空失败: {e}")
@@ -122,38 +134,53 @@ def get_price_history(tickers, start_date):
 
 def calculate_full_history(df_trans, price_data, sys_start_date):
     if df_trans.empty: return pd.DataFrame(), {}, 0
+    
     sys_start_ts = pd.to_datetime(sys_start_date)
     df_trans = df_trans.sort_values('Date')
     end_date = datetime.now()
     full_dates = pd.date_range(start=sys_start_ts, end=end_date, freq='D')
+    
     past_trans = df_trans[df_trans['Date'] < sys_start_ts]
     curr_trans = df_trans[df_trans['Date'] >= sys_start_ts].copy()
     curr_trans['Date_Norm'] = curr_trans['Date'].dt.normalize()
     trans_grouped = curr_trans.groupby('Date_Norm')
-    cash = 0; holdings = {}
+    
+    cash = 0
+    holdings = {}
+    
     def process_tx(c, h, row):
         t, s, p, a = row['Ticker'], row['Shares'], row['Price'], row['Action']
         if t == 'CASH': c += s
         elif a == 'BUY': c -= (s * p); h[t] = h.get(t, 0) + s
         elif a == 'SELL': c += (abs(s) * p); h[t] = h.get(t, 0) + s
         return c, h
-    for _, row in past_trans.iterrows(): cash, holdings = process_tx(cash, holdings, row)
-    nav_history = []; daily_snapshots = {} 
+
+    for _, row in past_trans.iterrows():
+        cash, holdings = process_tx(cash, holdings, row)
+
+    nav_history = []
+    daily_snapshots = {} 
+    
     for d in full_dates:
         d_norm = d.normalize()
         if d_norm in trans_grouped.groups:
-            for _, row in trans_grouped.get_group(d_norm).iterrows(): cash, holdings = process_tx(cash, holdings, row)
+            for _, row in trans_grouped.get_group(d_norm).iterrows():
+                cash, holdings = process_tx(cash, holdings, row)
+        
         daily_snapshots[d_norm] = (holdings.copy(), cash)
         mkt_val = 0
         has_price = not price_data.empty and d_norm in price_data.index
+        
         if has_price:
             for t, s in holdings.items():
-                if abs(s) > 0.001 and t in price_data.columns: mkt_val += s * price_data.loc[d_norm, t]
+                if abs(s) > 0.001 and t in price_data.columns:
+                    mkt_val += s * price_data.loc[d_norm, t]
             spy_val = price_data.loc[d_norm, 'SPY'] if 'SPY' in price_data.columns else 0
             total_assets = cash + mkt_val
             nav_history.append({'Date': d_norm, 'Total Assets': total_assets, 'Cash': cash, 'Market Value': mkt_val, 'SPY': spy_val})
         elif price_data.empty:
              nav_history.append({'Date': d_norm, 'Total Assets': cash, 'Cash': cash, 'Market Value': 0, 'SPY': 100})
+
     df_nav = pd.DataFrame(nav_history)
     if not df_nav.empty: df_nav = df_nav.set_index('Date')
     return df_nav, daily_snapshots, cash
@@ -163,23 +190,33 @@ def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_da
     end_ts = pd.to_datetime(end_date)
     valid_dates = sorted(daily_snapshots.keys())
     if not valid_dates: return pd.DataFrame(), 0
-    def get_closest_date(target, dates): return min(dates, key=lambda x: abs(x - target))
+    
+    def get_closest_date(target, dates):
+        return min(dates, key=lambda x: abs(x - target))
+    
     actual_start = get_closest_date(start_ts, valid_dates)
     actual_end = get_closest_date(end_ts, valid_dates)
     if actual_start > actual_end: actual_start = actual_end
+
     holdings_start, _ = daily_snapshots[actual_start]
     holdings_end, cash_end = daily_snapshots[actual_end]
+    
     if price_data.empty: return pd.DataFrame(), cash_end
+    
     price_idx = price_data.index
     p_start_idx = price_idx[price_idx <= actual_start]
     p_end_idx = price_idx[price_idx <= actual_end]
     if p_start_idx.empty or p_end_idx.empty: return pd.DataFrame(), cash_end
+    
     prices_start = price_data.loc[p_start_idx[-1]]
     prices_end = price_data.loc[p_end_idx[-1]]
+    
     mask = (df_trans['Date'] > actual_start) & (df_trans['Date'] <= actual_end)
     period_trans = df_trans.loc[mask]
+    
     all_tickers = set(holdings_start.keys()) | set(holdings_end.keys()) | set(period_trans['Ticker'].unique())
     if 'CASH' in all_tickers: all_tickers.remove('CASH')
+    
     perf_stats = []
     for t in all_tickers:
         p_s = prices_start.get(t, 0) if isinstance(prices_start, pd.Series) else 0
@@ -205,7 +242,7 @@ def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_da
     return df_perf, cash_end
 
 # ==========================================
-# 5. 数据加载
+# 5. 初始化
 # ==========================================
 
 df_trans = load_data()
@@ -222,12 +259,9 @@ else:
 # ==========================================
 with st.sidebar:
     st.title("🌲 松熙基金工作台")
-    
-    # 刷新按钮 (V13.3 新增)
     if st.button("🔄 刷新数据 (强制API调用)", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-    st.caption("提示：数据默认缓存10分钟，如未见更新请点击上方刷新。")
+        st.cache_data.clear(); st.rerun()
+    st.caption("提示：数据默认缓存10分钟。")
     st.divider()
 
     st.header("📝 交易录入")
@@ -268,7 +302,7 @@ with st.sidebar:
 # ==========================================
 
 if df_trans.empty:
-    st.info("👋 欢迎！数据库为空。请先在左侧录入第一笔资金（如 Ticker: CASH, Action: DEPOSIT）。")
+    st.info("👋 欢迎！数据库为空。请先在左侧录入第一笔资金。")
     st.stop()
 
 tickers = df_trans[df_trans['Ticker']!='CASH']['Ticker'].unique().tolist()
@@ -375,23 +409,51 @@ with tab1:
             if 'SPY' in plot_df:
                 fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='Ref Index', line=dict(color='#BDC3C7', dash='dot')))
             
+            # === [核心修复] 交易点标记 "卡片化" ===
             visible_trades = df_trans_filtered[df_trans_filtered['Ticker'] != 'CASH'].copy()
             if not visible_trades.empty:
                 visible_trades['Date_Norm'] = visible_trades['Date'].dt.normalize()
                 nav_lookup = plot_df['松熙组合']
-                for action, color, symbol in [('BUY', '#E74C3C', 'triangle-up'), ('SELL', '#2ECC71', 'triangle-down')]:
-                    subset = visible_trades[visible_trades['Action'] == action]
-                    if not subset.empty:
-                        y_vals = []; hover_texts = []; valid_dates = []
-                        for _, row in subset.iterrows():
-                            d = row['Date_Norm']
-                            if d in nav_lookup.index:
-                                y_vals.append(nav_lookup.loc[d])
-                                valid_dates.append(d)
-                                label = "Buy/Cover" if action=='BUY' else "Sell/Short"
-                                hover_texts.append(f"<b>{row['Ticker']}</b> ({label})<br>${row['Price']}<br><i>{row.get('Reason','')}</i>")
-                        if valid_dates:
-                            fig_nav.add_trace(go.Scatter(x=valid_dates, y=y_vals, mode='markers', name=label, marker=dict(symbol=symbol, size=10, color=color, line=dict(width=1, color='white')), text=hover_texts, hoverinfo='text'))
+                
+                for _, row in visible_trades.iterrows():
+                    d = row['Date_Norm']
+                    if d in nav_lookup.index:
+                        y_val = nav_lookup.loc[d]
+                        action = row['Action']
+                        ticker = row['Ticker']
+                        price = row['Price']
+                        
+                        # 颜色逻辑: Buy=Red, Sell=Green
+                        color = '#E74C3C' if 'BUY' in action else '#2ECC71'
+                        label_text = f"<b>{action[:3]} {ticker}</b>" # e.g. BUY NVDA
+                        
+                        # 1. 绘制方形点
+                        fig_nav.add_trace(go.Scatter(
+                            x=[d], y=[y_val],
+                            mode='markers',
+                            name='Trade',
+                            marker=dict(symbol='square', size=12, color=color, line=dict(width=1, color='white')),
+                            showlegend=False,
+                            hoverinfo='skip' # 鼠标不显示默认气泡，只看卡片
+                        ))
+                        
+                        # 2. 绘制 "卡片" (Annotation)
+                        fig_nav.add_annotation(
+                            x=d, y=y_val,
+                            text=label_text,
+                            showarrow=True,
+                            arrowhead=0,
+                            arrowsize=1,
+                            arrowwidth=1,
+                            arrowcolor=color,
+                            ax=0, ay=-30, # 向上偏移
+                            bgcolor="white",
+                            bordercolor=color,
+                            borderwidth=1,
+                            borderpad=4,
+                            font=dict(size=11, color="black"),
+                            opacity=0.9
+                        )
             
             fig_nav.update_layout(height=480, margin=dict(l=20, r=20, t=30, b=20), legend=dict(orientation="h", y=1.02, x=0), hovermode="x unified")
             st.plotly_chart(fig_nav, use_container_width=True)
@@ -403,15 +465,45 @@ with tab1:
             pos_data = []
             for _, row in df_perf_period.iterrows():
                 if abs(row['当前市值']) > 1 and row['类型'] != '已平仓':
-                    pos_data.append({'Label': row['代码'], 'Size': abs(row['当前市值']), 'SignedValue': row['当前市值'], 'Type': row['类型']})
+                    pos_data.append({
+                        'Label': row['代码'], 
+                        'Size': abs(row['当前市值']), 
+                        'SignedValue': row['当前市值'], 
+                        'Type': row['类型'],
+                        # 构造显示文本：代码 + 换行 + 市值
+                        'DisplayText': f"<b>{row['代码']}</b><br>${abs(row['当前市值']):,.0f}<br>{(abs(row['当前市值'])/(df_perf_period['当前市值'].abs().sum() + cash_period_end)*100):.1f}%"
+                    })
             if cash_period_end > 1:
-                pos_data.append({'Label': '现金', 'Size': cash_period_end, 'SignedValue': 0, 'Type': 'Cash'})
+                pos_data.append({
+                    'Label': '现金', 'Size': cash_period_end, 'SignedValue': 0, 'Type': 'Cash',
+                    'DisplayText': f"<b>CASH</b><br>${cash_period_end:,.0f}"
+                })
+            
             if pos_data:
                 df_tree = pd.DataFrame(pos_data)
                 max_abs = max(abs(df_tree['SignedValue'].min()), abs(df_tree['SignedValue'].max())) if not df_tree.empty else 1
                 if max_abs == 0: max_abs = 1
-                fig_tree = px.treemap(df_tree, path=[px.Constant("组合"), 'Label'], values='Size', color='SignedValue', color_continuous_scale=[(0.0, '#228B22'), (0.5, '#F5F5F5'), (1.0, '#B22222')], range_color=[-max_abs, max_abs])
-                fig_tree.update_traces(hovertemplate='<b>%{label}</b><br>市值: %{value:,.0f}', marker=dict(line=dict(width=0)), root_color="rgba(0,0,0,0)")
+                
+                # === [美化] Treemap ===
+                fig_tree = px.treemap(
+                    df_tree, 
+                    path=[px.Constant("组合"), 'Label'], 
+                    values='Size', 
+                    color='SignedValue', 
+                    # 优化色阶：红(多)-白(平)-绿(空)
+                    color_continuous_scale=[(0.0, '#2ECC71'), (0.5, '#F5F5F5'), (1.0, '#E74C3C')], 
+                    range_color=[-max_abs, max_abs],
+                    custom_data=['DisplayText'] # 传入自定义文本
+                )
+                
+                fig_tree.update_traces(
+                    texttemplate='%{customdata[0]}', # 显示上面构造的 HTML 文本
+                    textinfo='label+text',
+                    textfont=dict(size=14, family="Arial Black"), # 字体加大加粗
+                    marker=dict(line=dict(width=2, color='white')), # 白色边框，瓷砖效果
+                    root_color="rgba(0,0,0,0)"
+                )
+                
                 fig_tree.update_layout(height=480, margin=dict(t=30, b=20, l=0, r=0), coloraxis_showscale=False)
                 st.plotly_chart(fig_tree, use_container_width=True)
             else: st.info("期末为空仓")
@@ -419,9 +511,9 @@ with tab1:
 
 with tab2:
     st.subheader("区间盈亏贡献")
-    if df_perf_period.empty: st.info("无数据")
+    if df_perf.empty: st.info("无数据")
     else:
-        df_pnl_plot = df_perf_period.sort_values('总盈亏', ascending=True)
+        df_pnl_plot = df_perf.sort_values('总盈亏', ascending=True)
         colors = ['#E74C3C' if x >= 0 else '#2ECC71' for x in df_pnl_plot['总盈亏']]
         fig_pnl = go.Figure(go.Bar(
             y=df_pnl_plot['代码'], x=df_pnl_plot['总盈亏'], orientation='h',
