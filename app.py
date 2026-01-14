@@ -18,7 +18,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. CSS 样式 (保持 V13 布局)
+# 2. CSS 样式 (标准版：不隐藏任何系统菜单)
 # ==========================================
 st.markdown("""
     <style>
@@ -525,6 +525,7 @@ with tab3:
         display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
         st.dataframe(display_df[['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason']], use_container_width=True, hide_index=True)
     else: st.info("无交易")
+
 
 
 
