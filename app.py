@@ -407,32 +407,63 @@ with tab1:
             if 'SPY' in plot_df:
                 fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='Ref Index', line=dict(color='#BDC3C7', dash='dot')))
             
-            # === [V13.9] 交易点垂直堆叠 (防重叠) ===
+            # === [V14.0 智能聚合标记] ===
             visible_trades = df_trans_filtered[df_trans_filtered['Ticker'] != 'CASH'].copy()
             if not visible_trades.empty:
                 visible_trades['Date_Norm'] = visible_trades['Date'].dt.normalize()
+                # 按日期分组
+                date_groups = visible_trades.groupby('Date_Norm')
                 nav_lookup = plot_df['松熙组合']
                 
-                # 记录每个日期的交易次数，用于计算偏移
-                date_counts = {} # {date: count}
-                
-                for _, row in visible_trades.iterrows():
-                    d = row['Date_Norm']
+                for d, group in date_groups:
                     if d in nav_lookup.index:
-                        base_y = nav_lookup.loc[d]
+                        y_val = nav_lookup.loc[d]
                         
-                        # 计算堆叠偏移量: 第N笔交易向上偏移 N * 3%
-                        count = date_counts.get(d, 0)
-                        y_val = base_y * (1 + 0.03 * count) 
-                        date_counts[d] = count + 1
+                        # 检查当日成分
+                        has_buy = any('BUY' in a for a in group['Action'])
+                        has_sell = any('SELL' in a for a in group['Action'])
                         
-                        action = row['Action']; ticker = row['Ticker']; price = row['Price']; reason = row['Reason']
-                        color = '#E74C3C' if 'BUY' in action else '#2ECC71'
-                        label_text = f"<b>{action[:3]} {ticker}</b>" 
-                        hover_content = f"<b>{action} {ticker}</b><br>📅 {d.strftime('%Y-%m-%d')}<br>💰 价格: ${price:,.2f}<br>💵 交易额: ${price * abs(row['Shares']):,.0f}<br>📝 逻辑: <i>{reason}</i>"
+                        # 1. 决定标记样式
+                        if has_buy and has_sell:
+                            color = '#FFD700' # 金色
+                            symbol = 'diamond'
+                            size = 14
+                            main_label = f"<b>Mix:{len(group)}</b>" # 显示混合数量
+                        elif has_buy:
+                            color = '#E74C3C' # 红色
+                            symbol = 'square'
+                            size = 12
+                            main_label = f"<b>BUY:{len(group)}</b>" if len(group)>1 else f"<b>{group.iloc[0]['Action'][:3]} {group.iloc[0]['Ticker']}</b>"
+                        else:
+                            color = '#2ECC71' # 绿色
+                            symbol = 'square'
+                            size = 12
+                            main_label = f"<b>SELL:{len(group)}</b>" if len(group)>1 else f"<b>{group.iloc[0]['Action'][:3]} {group.iloc[0]['Ticker']}</b>"
                         
-                        fig_nav.add_trace(go.Scatter(x=[d], y=[y_val], mode='markers', name='Trade', marker=dict(symbol='square', size=12, color=color, line=dict(width=1, color='white')), showlegend=False, hovertext=hover_content, hoverinfo='text'))
-                        fig_nav.add_annotation(x=d, y=y_val, text=label_text, showarrow=True, arrowhead=0, arrowsize=1, arrowwidth=1, arrowcolor=color, ax=0, ay=-30, bgcolor="white", bordercolor=color, borderwidth=1, borderpad=4, font=dict(size=11, color="black"), opacity=0.9)
+                        # 2. 构造富文本 Hover (彩色列表)
+                        hover_lines = []
+                        hover_lines.append(f"<b>📅 {d.strftime('%Y-%m-%d')}</b>")
+                        for _, row in group.iterrows():
+                            # 严格的颜色控制
+                            text_color = "#E74C3C" if 'BUY' in row['Action'] else "#2ECC71"
+                            hover_lines.append(
+                                f"<span style='color:{text_color}'><b>{row['Action']} {row['Ticker']}</b></span><br>"
+                                f"   💵 ${row['Price'] * abs(row['Shares']):,.0f} | 📝 {row['Reason']}"
+                            )
+                        hover_content = "<br>".join(hover_lines)
+                        
+                        # 3. 绘图
+                        fig_nav.add_trace(go.Scatter(
+                            x=[d], y=[y_val], mode='markers', name='Trade',
+                            marker=dict(symbol=symbol, size=size, color=color, line=dict(width=1, color='white')),
+                            showlegend=False, 
+                            hovertext=hover_content, hoverinfo='text'
+                        ))
+                        fig_nav.add_annotation(
+                            x=d, y=y_val, text=main_label, showarrow=True, arrowhead=0, arrowsize=1,
+                            arrowwidth=1, arrowcolor=color, ax=0, ay=-35, bgcolor="white",
+                            bordercolor=color, borderwidth=1, borderpad=4, font=dict(size=10, color="black"), opacity=0.9
+                        )
             
             fig_nav.update_layout(height=480, margin=dict(l=20, r=20, t=30, b=20), legend=dict(orientation="h", y=1.02, x=0), hovermode="x unified")
             st.plotly_chart(fig_nav, use_container_width=True)
