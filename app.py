@@ -22,18 +22,13 @@ st.set_page_config(
 # ==========================================
 st.markdown("""
     <style>
-    /* [核心修复] 彻底隐藏 Streamlit 顶部 Header 并消除占位 */
-    header[data-testid="stHeader"] {
-        visibility: hidden;
-        height: 0px;
+    /* 仅调整边距，不隐藏顶部 Header */
+    .block-container { 
+        padding-top: 1rem; 
+        padding-bottom: 3rem; 
     }
     
-    /* [核心修复] 调整主容器边距：2.5rem 确保标题不贴顶，也不会被系统栏遮挡 */
-    .block-container {
-        padding-top: 2.5rem; 
-        padding-bottom: 3rem;
-    }
-    
+    /* 下面是您喜欢的 UI 样式 (卡片、标题等)，保留不动 */
     .header-wrapper {
         display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
         flex-wrap: wrap; gap: 30px; width: 100%; margin-bottom: 10px;
@@ -530,6 +525,7 @@ with tab3:
         display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
         st.dataframe(display_df[['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason']], use_container_width=True, hide_index=True)
     else: st.info("无交易")
+
 
 
 
