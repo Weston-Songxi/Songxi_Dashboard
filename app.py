@@ -18,13 +18,12 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. CSS 样式 (保持 V13 布局)
+# 2. CSS 样式
 # ==========================================
 st.markdown("""
     <style>
     .block-container { padding-top: 1rem; padding-bottom: 3rem; }
     
-    /* Header 布局 */
     .header-wrapper {
         display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
         flex-wrap: wrap; gap: 30px; width: 100%; margin-bottom: 10px;
@@ -40,7 +39,6 @@ st.markdown("""
     
     .header-right { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
     
-    /* KPI 卡片 */
     .kpi-box {
         border: 1px solid #e1e4e8; border-radius: 8px; padding: 0 15px; min-width: 100px; height: 75px;
         display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -389,12 +387,12 @@ df_trans_filtered = df_trans.loc[mask_trans]
 
 # --- Tabs ---
 st.caption(f"📅 数据展示区间: **{start_filter}** 至 **{end_filter}**")
-tab1, tab2, tab3 = st.tabs(["📊 走势与持仓", "🏆 业绩归因", "📝 调仓记录"])
+tab1, tab2, tab3 = st.tabs(["📊 走势与持仓", "🏆 业绩归因", "📝 交易流水"])
 
 with tab1:
     col_chart, col_pos = st.columns([2, 1])
     with col_chart:
-        st.subheader("净值走势")
+        st.subheader("净值走势 (归一化)")
         if not df_nav_filtered.empty:
             start_val = df_nav_filtered['Total Assets'].iloc[0]
             base = start_val if start_val > 0 else 1
@@ -407,48 +405,24 @@ with tab1:
             fig_nav = go.Figure()
             fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['松熙组合'], name='松熙组合', line=dict(color='#2c3e50', width=2.5)))
             if 'SPY' in plot_df:
-                fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='纳斯达克100', line=dict(color='#BDC3C7', dash='dot')))
+                fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='Ref Index', line=dict(color='#BDC3C7', dash='dot')))
             
-            # === [V13.7 完美修复] 交易点悬停显示详细信息 ===
+            # V13.7 交易点
             visible_trades = df_trans_filtered[df_trans_filtered['Ticker'] != 'CASH'].copy()
             if not visible_trades.empty:
                 visible_trades['Date_Norm'] = visible_trades['Date'].dt.normalize()
                 nav_lookup = plot_df['松熙组合']
-                
                 for _, row in visible_trades.iterrows():
                     d = row['Date_Norm']
                     if d in nav_lookup.index:
                         y_val = nav_lookup.loc[d]
-                        action = row['Action']
-                        ticker = row['Ticker']
-                        price = row['Price']
-                        reason = row['Reason'] if row['Reason'] else "无记录"
-                        
+                        action = row['Action']; ticker = row['Ticker']; price = row['Price']; reason = row['Reason']
                         color = '#E74C3C' if 'BUY' in action else '#2ECC71'
                         label_text = f"<b>{action[:3]} {ticker}</b>" 
+                        hover_content = f"<b>{action} {ticker}</b><br>📅 {d.strftime('%Y-%m-%d')}<br>💰 价格: ${price:,.2f}<br>💵 交易额: ${price * abs(row['Shares']):,.0f}<br>📝 逻辑: <i>{reason}</i>"
                         
-                        # 构造富文本 Hover
-                        hover_content = (
-                            f"<b>{action} {ticker}</b><br>"
-                            f"📅 {d.strftime('%Y-%m-%d')}<br>"
-                            f"💰 价格: ${price:,.2f}<br>"
-                            f"💵 交易额: ${price * abs(row['Shares']):,.0f}<br>"
-                            f"📝 逻辑: <i>{reason}</i>"
-                        )
-                        
-                        fig_nav.add_trace(go.Scatter(
-                            x=[d], y=[y_val], mode='markers', name='Trade',
-                            marker=dict(symbol='square', size=12, color=color, line=dict(width=1, color='white')),
-                            showlegend=False, 
-                            hovertext=hover_content, # 注入文本
-                            hoverinfo='text' # 强制显示文本
-                        ))
-                        
-                        fig_nav.add_annotation(
-                            x=d, y=y_val, text=label_text, showarrow=True, arrowhead=0, arrowsize=1,
-                            arrowwidth=1, arrowcolor=color, ax=0, ay=-30, bgcolor="white",
-                            bordercolor=color, borderwidth=1, borderpad=4, font=dict(size=11, color="black"), opacity=0.9
-                        )
+                        fig_nav.add_trace(go.Scatter(x=[d], y=[y_val], mode='markers', name='Trade', marker=dict(symbol='square', size=12, color=color, line=dict(width=1, color='white')), showlegend=False, hovertext=hover_content, hoverinfo='text'))
+                        fig_nav.add_annotation(x=d, y=y_val, text=label_text, showarrow=True, arrowhead=0, arrowsize=1, arrowwidth=1, arrowcolor=color, ax=0, ay=-30, bgcolor="white", bordercolor=color, borderwidth=1, borderpad=4, font=dict(size=11, color="black"), opacity=0.9)
             
             fig_nav.update_layout(height=480, margin=dict(l=20, r=20, t=30, b=20), legend=dict(orientation="h", y=1.02, x=0), hovermode="x unified")
             st.plotly_chart(fig_nav, use_container_width=True)
@@ -457,39 +431,64 @@ with tab1:
     with col_pos:
         st.subheader("期末持仓结构")
         if not df_perf_period.empty:
+            # === [V13.8 升级] 交互式柱形图 ===
+            
+            # 1. 准备数据: 计算占比
+            total_mv = df_perf_period['当前市值'].sum()
+            nav_end = cash_period_end + total_mv # 期末净值
+            
             pos_data = []
             for _, row in df_perf_period.iterrows():
                 if abs(row['当前市值']) > 1 and row['类型'] != '已平仓':
                     pos_data.append({
-                        'Label': row['代码'], 
-                        'Size': abs(row['当前市值']), 
-                        'SignedValue': row['当前市值'], 
-                        'Type': row['类型'],
-                        'DisplayText': f"<b>{row['代码']}</b><br>${abs(row['当前市值']):,.0f}<br>{(abs(row['当前市值'])/(df_perf_period['当前市值'].abs().sum() + cash_period_end)*100):.1f}%"
+                        'Ticker': row['代码'],
+                        'Value': row['当前市值'],
+                        'Pct': (row['当前市值'] / nav_end) * 100,
+                        'Type': row['类型']
                     })
             if cash_period_end > 1:
                 pos_data.append({
-                    'Label': '现金', 'Size': cash_period_end, 'SignedValue': 0, 'Type': 'Cash',
-                    'DisplayText': f"<b>CASH</b><br>${cash_period_end:,.0f}"
+                    'Ticker': 'CASH', 'Value': cash_period_end, 
+                    'Pct': (cash_period_end / nav_end) * 100, 'Type': 'Cash'
                 })
             
             if pos_data:
-                df_tree = pd.DataFrame(pos_data)
-                max_abs = max(abs(df_tree['SignedValue'].min()), abs(df_tree['SignedValue'].max())) if not df_tree.empty else 1
-                if max_abs == 0: max_abs = 1
+                df_bar = pd.DataFrame(pos_data)
                 
-                fig_tree = px.treemap(
-                    df_tree, path=[px.Constant("组合"), 'Label'], values='Size', color='SignedValue', 
-                    color_continuous_scale=[(0.0, '#2ECC71'), (0.5, '#F5F5F5'), (1.0, '#E74C3C')], 
-                    range_color=[-max_abs, max_abs], custom_data=['DisplayText']
+                # 2. 排序控制器
+                sort_order = st.selectbox("排序方式", ["占比从大到小", "占比从小到大", "代码 A-Z"], label_visibility="collapsed")
+                
+                if sort_order == "占比从大到小": df_bar = df_bar.sort_values('Pct', ascending=False)
+                elif sort_order == "占比从小到大": df_bar = df_bar.sort_values('Pct', ascending=True)
+                else: df_bar = df_bar.sort_values('Ticker')
+                
+                # 3. 绘图
+                colors = ['#E74C3C' if v > 0 else '#2ECC71' for v in df_bar['Value']] # 红多绿空
+                
+                fig_bar = go.Figure(go.Bar(
+                    x=df_bar['Ticker'],
+                    y=df_bar['Pct'],
+                    text=[f"{'+' if p>0 else ''}{p:.1f}%" for p in df_bar['Pct']], # 显示 +20%
+                    textposition='outside',
+                    textfont=dict(family="Arial Black", size=12, color="black"),
+                    marker_color=colors,
+                    marker_line_color='black',
+                    marker_line_width=1.5,
+                    hovertemplate='<b>%{x}</b><br>市值: $%{customdata:,.0f}<br>占比: %{y:.2f}%<extra></extra>',
+                    customdata=df_bar['Value']
+                ))
+                
+                # 4. 样式微调
+                fig_bar.update_layout(
+                    height=480,
+                    margin=dict(t=40, b=40, l=20, r=20),
+                    xaxis=dict(title=None, tickfont=dict(size=12, weight='bold')),
+                    yaxis=dict(title="占净值比例 (%)", showgrid=True, gridcolor='#f0f0f0'),
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    dragmode=False 
                 )
-                fig_tree.update_traces(
-                    texttemplate='%{customdata[0]}', textinfo='label+text',
-                    textfont=dict(size=14, family="Arial Black"), marker=dict(line=dict(width=2, color='white')),
-                    root_color="rgba(0,0,0,0)"
-                )
-                fig_tree.update_layout(height=480, margin=dict(t=30, b=20, l=0, r=0), coloraxis_showscale=False)
-                st.plotly_chart(fig_tree, use_container_width=True)
+                st.plotly_chart(fig_bar, use_container_width=True)
+                
             else: st.info("期末为空仓")
         else: st.info("无数据")
 
@@ -519,4 +518,3 @@ with tab3:
         display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
         st.dataframe(display_df[['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason']], use_container_width=True, hide_index=True)
     else: st.info("无交易")
-
