@@ -389,12 +389,12 @@ df_trans_filtered = df_trans.loc[mask_trans]
 
 # --- Tabs ---
 st.caption(f"📅 数据展示区间: **{start_filter}** 至 **{end_filter}**")
-tab1, tab2, tab3 = st.tabs(["📊 走势与持仓", "🏆 业绩归因", "📝 交易流水"])
+tab1, tab2, tab3 = st.tabs(["📊 走势与持仓", "🏆 业绩归因", "📝 调仓记录"])
 
 with tab1:
     col_chart, col_pos = st.columns([2, 1])
     with col_chart:
-        st.subheader("净值走势 (归一化)")
+        st.subheader("净值走势")
         if not df_nav_filtered.empty:
             start_val = df_nav_filtered['Total Assets'].iloc[0]
             base = start_val if start_val > 0 else 1
@@ -407,7 +407,7 @@ with tab1:
             fig_nav = go.Figure()
             fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['松熙组合'], name='松熙组合', line=dict(color='#2c3e50', width=2.5)))
             if 'SPY' in plot_df:
-                fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='Ref Index', line=dict(color='#BDC3C7', dash='dot')))
+                fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='纳斯达克100', line=dict(color='#BDC3C7', dash='dot')))
             
             # === [V13.7 完美修复] 交易点悬停显示详细信息 ===
             visible_trades = df_trans_filtered[df_trans_filtered['Ticker'] != 'CASH'].copy()
@@ -519,3 +519,4 @@ with tab3:
         display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
         st.dataframe(display_df[['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason']], use_container_width=True, hide_index=True)
     else: st.info("无交易")
+
