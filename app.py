@@ -407,7 +407,35 @@ with tab1:
             if 'SPY' in plot_df:
                 fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='Ref Index', line=dict(color='#BDC3C7', dash='dot')))
             
-            # === [V14.2 终极视觉优化] ===
+            # === [V15.0] 自动标注区间高低点 ===
+            if not plot_df.empty:
+                # 1. 查找最大值 (High)
+                max_idx = plot_df['松熙组合'].idxmax()
+                max_val = plot_df.loc[max_idx, '松熙组合']
+                fig_nav.add_annotation(
+                    x=max_idx, y=max_val,
+                    text=f"<b>High: {max_val:.1f}</b>",
+                    showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                    arrowcolor="#9B59B6", # 紫色
+                    ax=0, ay=-45,
+                    bgcolor="white", bordercolor="#9B59B6", borderwidth=1, borderpad=4,
+                    font=dict(size=12, color="#9B59B6", family="Arial Black")
+                )
+                
+                # 2. 查找最小值 (Low)
+                min_idx = plot_df['松熙组合'].idxmin()
+                min_val = plot_df.loc[min_idx, '松熙组合']
+                fig_nav.add_annotation(
+                    x=min_idx, y=min_val,
+                    text=f"<b>Low: {min_val:.1f}</b>",
+                    showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                    arrowcolor="#E67E22", # 深橙色
+                    ax=0, ay=45,
+                    bgcolor="white", bordercolor="#E67E22", borderwidth=1, borderpad=4,
+                    font=dict(size=12, color="#E67E22", family="Arial Black")
+                )
+
+            # === 买卖点标注 (V14.2 逻辑) ===
             visible_trades = df_trans_filtered[df_trans_filtered['Ticker'] != 'CASH'].copy()
             if not visible_trades.empty:
                 visible_trades['Date_Norm'] = visible_trades['Date'].dt.normalize()
@@ -420,55 +448,27 @@ with tab1:
                         has_buy = any('BUY' in a for a in group['Action'])
                         has_sell = any('SELL' in a for a in group['Action'])
                         
-                        if has_buy and has_sell:
-                            color = '#FFD700'; symbol = 'diamond'; size = 13
-                        elif has_buy:
-                            color = '#E74C3C'; symbol = 'square'; size = 11
-                        else:
-                            color = '#2ECC71'; symbol = 'square'; size = 11
+                        if has_buy and has_sell: color = '#FFD700'; symbol = 'diamond'; size = 13
+                        elif has_buy: color = '#E74C3C'; symbol = 'square'; size = 11
+                        else: color = '#2ECC71'; symbol = 'square'; size = 11
                         
-                        # 1. 静态卡片 (字体放大 + 加粗)
+                        # 静态卡片
                         card_lines = []
                         hover_lines = [f"<span style='font-size:16px'><b>📅 {d.strftime('%Y-%m-%d')}</b></span>"]
-                        
                         for _, row in group.iterrows():
                             txt_color = "#D32F2F" if 'BUY' in row['Action'] else "#2E7D32"
                             line_str = f"<span style='color:{txt_color}'><b>{row['Action'][:3]} {row['Ticker']}</b></span>"
                             card_lines.append(line_str)
-                            
-                            hover_lines.append(
-                                f"{line_str}<br>   💵 ${row['Price'] * abs(row['Shares']):,.0f} | 📝 {row['Reason']}"
-                            )
+                            hover_lines.append(f"{line_str}<br>   💵 ${row['Price'] * abs(row['Shares']):,.0f} | 📝 {row['Reason']}")
                         
-                        if len(card_lines) > 3:
-                            card_text = "<br>".join(card_lines[:3]) + f"<br><span style='color:black'>...(+{len(card_lines)-3})</span>"
-                        else:
-                            card_text = "<br>".join(card_lines)
-                            
+                        if len(card_lines) > 3: card_text = "<br>".join(card_lines[:3]) + f"<br><span style='color:black'>...(+{len(card_lines)-3})</span>"
+                        else: card_text = "<br>".join(card_lines)
                         hover_content = "<br>".join(hover_lines)
                         
-                        fig_nav.add_trace(go.Scatter(
-                            x=[d], y=[y_val], mode='markers', name='Trade',
-                            marker=dict(symbol=symbol, size=size, color=color, line=dict(width=1, color='white')),
-                            showlegend=False, 
-                            hovertext=hover_content, 
-                            hoverinfo='text'
-                        ))
-                        
-                        fig_nav.add_annotation(
-                            x=d, y=y_val, text=card_text, 
-                            showarrow=True, arrowhead=0, arrowsize=1, arrowwidth=1, arrowcolor=color,
-                            ax=0, ay=-35, 
-                            bgcolor="white", bordercolor=color, borderwidth=1, borderpad=6,
-                            font=dict(size=13, family="Arial Black", color="black"), # 字体加大加粗
-                            opacity=0.9
-                        )
+                        fig_nav.add_trace(go.Scatter(x=[d], y=[y_val], mode='markers', name='Trade', marker=dict(symbol=symbol, size=size, color=color, line=dict(width=1, color='white')), showlegend=False, hovertext=hover_content, hoverinfo='text'))
+                        fig_nav.add_annotation(x=d, y=y_val, text=card_text, showarrow=True, arrowhead=0, arrowsize=1, arrowwidth=1, arrowcolor=color, ax=0, ay=-35, bgcolor="white", bordercolor=color, borderwidth=1, borderpad=6, font=dict(size=13, family="Arial Black", color="black"), opacity=0.9)
             
-            # 2. 优化 Hover 样式
-            fig_nav.update_layout(
-                height=480, margin=dict(l=20, r=20, t=30, b=20), legend=dict(orientation="h", y=1.02, x=0), hovermode="x unified",
-                hoverlabel=dict(bgcolor="white", font_size=14, font_family="Arial") # 浮窗全局优化
-            )
+            fig_nav.update_layout(height=480, margin=dict(l=20, r=20, t=30, b=20), legend=dict(orientation="h", y=1.02, x=0), hovermode="x unified", hoverlabel=dict(bgcolor="white", font_size=14, font_family="Arial"))
             st.plotly_chart(fig_nav, use_container_width=True)
         else: st.warning("该区间内无净值数据")
 
