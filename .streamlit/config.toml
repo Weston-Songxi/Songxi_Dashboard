@@ -1,6 +1,1 @@
-[client]
-toolbarMode = "viewer"  # 隐藏开发者选项，只保留极简模式
-showErrorDetails = false # 隐藏错误详情（可选）
 
-[ui]
-hideTopBar = true  # 尝试隐藏顶部栏（部分版本支持）
