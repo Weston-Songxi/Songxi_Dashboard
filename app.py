@@ -409,7 +409,7 @@ with tab1:
             if 'SPY' in plot_df:
                 fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='Ref Index', line=dict(color='#BDC3C7', dash='dot')))
             
-            # === [核心修复] 交易点标记 "卡片化" ===
+            # === [V13.7 完美修复] 交易点悬停显示详细信息 ===
             visible_trades = df_trans_filtered[df_trans_filtered['Ticker'] != 'CASH'].copy()
             if not visible_trades.empty:
                 visible_trades['Date_Norm'] = visible_trades['Date'].dt.normalize()
@@ -421,13 +421,27 @@ with tab1:
                         y_val = nav_lookup.loc[d]
                         action = row['Action']
                         ticker = row['Ticker']
+                        price = row['Price']
+                        reason = row['Reason'] if row['Reason'] else "无记录"
+                        
                         color = '#E74C3C' if 'BUY' in action else '#2ECC71'
                         label_text = f"<b>{action[:3]} {ticker}</b>" 
+                        
+                        # 构造富文本 Hover
+                        hover_content = (
+                            f"<b>{action} {ticker}</b><br>"
+                            f"📅 {d.strftime('%Y-%m-%d')}<br>"
+                            f"💰 价格: ${price:,.2f}<br>"
+                            f"💵 交易额: ${price * abs(row['Shares']):,.0f}<br>"
+                            f"📝 逻辑: <i>{reason}</i>"
+                        )
                         
                         fig_nav.add_trace(go.Scatter(
                             x=[d], y=[y_val], mode='markers', name='Trade',
                             marker=dict(symbol='square', size=12, color=color, line=dict(width=1, color='white')),
-                            showlegend=False, hoverinfo='skip'
+                            showlegend=False, 
+                            hovertext=hover_content, # 注入文本
+                            hoverinfo='text' # 强制显示文本
                         ))
                         
                         fig_nav.add_annotation(
@@ -481,7 +495,6 @@ with tab1:
 
 with tab2:
     st.subheader("区间盈亏贡献")
-    # [核心修复] 使用正确的变量名 df_perf_period
     if df_perf_period.empty: st.info("无数据")
     else:
         df_pnl_plot = df_perf_period.sort_values('总盈亏', ascending=True)
