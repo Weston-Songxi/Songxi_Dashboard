@@ -392,7 +392,7 @@ tab1, tab2, tab3 = st.tabs(["📊 走势与持仓", "🏆 业绩归因", "📝 �
 with tab1:
     col_chart, col_pos = st.columns([2, 1])
     with col_chart:
-        st.subheader("净值走势 (归一化)")
+        st.subheader("净值走势")
         if not df_nav_filtered.empty:
             start_val = df_nav_filtered['Total Assets'].iloc[0]
             base = start_val if start_val > 0 else 1
@@ -405,7 +405,7 @@ with tab1:
             fig_nav = go.Figure()
             fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['松熙组合'], name='松熙组合', line=dict(color='#2c3e50', width=2.5)))
             if 'SPY' in plot_df:
-                fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='Ref Index', line=dict(color='#BDC3C7', dash='dot')))
+                fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='纳斯达克100', line=dict(color='#BDC3C7', dash='dot')))
             
             # V15.0 高低点
             if not plot_df.empty:
@@ -496,7 +496,7 @@ with tab2:
         st.plotly_chart(fig_pnl, use_container_width=True)
 
 with tab3:
-    st.subheader("区间交易流水")
+    st.subheader("区间调仓记录")
     
     # === [V15.2] 交易流水筛选 + 排序 ===
     c1, c2 = st.columns([1, 4])
@@ -520,3 +520,4 @@ with tab3:
         display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
         st.dataframe(display_df[['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason']], use_container_width=True, hide_index=True)
     else: st.info("无交易")
+
