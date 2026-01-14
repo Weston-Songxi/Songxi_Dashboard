@@ -421,38 +421,19 @@ with tab1:
                         y_val = nav_lookup.loc[d]
                         action = row['Action']
                         ticker = row['Ticker']
-                        price = row['Price']
-                        
-                        # 颜色逻辑: Buy=Red, Sell=Green
                         color = '#E74C3C' if 'BUY' in action else '#2ECC71'
-                        label_text = f"<b>{action[:3]} {ticker}</b>" # e.g. BUY NVDA
+                        label_text = f"<b>{action[:3]} {ticker}</b>" 
                         
-                        # 1. 绘制方形点
                         fig_nav.add_trace(go.Scatter(
-                            x=[d], y=[y_val],
-                            mode='markers',
-                            name='Trade',
+                            x=[d], y=[y_val], mode='markers', name='Trade',
                             marker=dict(symbol='square', size=12, color=color, line=dict(width=1, color='white')),
-                            showlegend=False,
-                            hoverinfo='skip' # 鼠标不显示默认气泡，只看卡片
+                            showlegend=False, hoverinfo='skip'
                         ))
                         
-                        # 2. 绘制 "卡片" (Annotation)
                         fig_nav.add_annotation(
-                            x=d, y=y_val,
-                            text=label_text,
-                            showarrow=True,
-                            arrowhead=0,
-                            arrowsize=1,
-                            arrowwidth=1,
-                            arrowcolor=color,
-                            ax=0, ay=-30, # 向上偏移
-                            bgcolor="white",
-                            bordercolor=color,
-                            borderwidth=1,
-                            borderpad=4,
-                            font=dict(size=11, color="black"),
-                            opacity=0.9
+                            x=d, y=y_val, text=label_text, showarrow=True, arrowhead=0, arrowsize=1,
+                            arrowwidth=1, arrowcolor=color, ax=0, ay=-30, bgcolor="white",
+                            bordercolor=color, borderwidth=1, borderpad=4, font=dict(size=11, color="black"), opacity=0.9
                         )
             
             fig_nav.update_layout(height=480, margin=dict(l=20, r=20, t=30, b=20), legend=dict(orientation="h", y=1.02, x=0), hovermode="x unified")
@@ -470,7 +451,6 @@ with tab1:
                         'Size': abs(row['当前市值']), 
                         'SignedValue': row['当前市值'], 
                         'Type': row['类型'],
-                        # 构造显示文本：代码 + 换行 + 市值
                         'DisplayText': f"<b>{row['代码']}</b><br>${abs(row['当前市值']):,.0f}<br>{(abs(row['当前市值'])/(df_perf_period['当前市值'].abs().sum() + cash_period_end)*100):.1f}%"
                     })
             if cash_period_end > 1:
@@ -484,26 +464,16 @@ with tab1:
                 max_abs = max(abs(df_tree['SignedValue'].min()), abs(df_tree['SignedValue'].max())) if not df_tree.empty else 1
                 if max_abs == 0: max_abs = 1
                 
-                # === [美化] Treemap ===
                 fig_tree = px.treemap(
-                    df_tree, 
-                    path=[px.Constant("组合"), 'Label'], 
-                    values='Size', 
-                    color='SignedValue', 
-                    # 优化色阶：红(多)-白(平)-绿(空)
+                    df_tree, path=[px.Constant("组合"), 'Label'], values='Size', color='SignedValue', 
                     color_continuous_scale=[(0.0, '#2ECC71'), (0.5, '#F5F5F5'), (1.0, '#E74C3C')], 
-                    range_color=[-max_abs, max_abs],
-                    custom_data=['DisplayText'] # 传入自定义文本
+                    range_color=[-max_abs, max_abs], custom_data=['DisplayText']
                 )
-                
                 fig_tree.update_traces(
-                    texttemplate='%{customdata[0]}', # 显示上面构造的 HTML 文本
-                    textinfo='label+text',
-                    textfont=dict(size=14, family="Arial Black"), # 字体加大加粗
-                    marker=dict(line=dict(width=2, color='white')), # 白色边框，瓷砖效果
+                    texttemplate='%{customdata[0]}', textinfo='label+text',
+                    textfont=dict(size=14, family="Arial Black"), marker=dict(line=dict(width=2, color='white')),
                     root_color="rgba(0,0,0,0)"
                 )
-                
                 fig_tree.update_layout(height=480, margin=dict(t=30, b=20, l=0, r=0), coloraxis_showscale=False)
                 st.plotly_chart(fig_tree, use_container_width=True)
             else: st.info("期末为空仓")
@@ -511,9 +481,10 @@ with tab1:
 
 with tab2:
     st.subheader("区间盈亏贡献")
-    if df_perf.empty: st.info("无数据")
+    # [核心修复] 使用正确的变量名 df_perf_period
+    if df_perf_period.empty: st.info("无数据")
     else:
-        df_pnl_plot = df_perf.sort_values('总盈亏', ascending=True)
+        df_pnl_plot = df_perf_period.sort_values('总盈亏', ascending=True)
         colors = ['#E74C3C' if x >= 0 else '#2ECC71' for x in df_pnl_plot['总盈亏']]
         fig_pnl = go.Figure(go.Bar(
             y=df_pnl_plot['代码'], x=df_pnl_plot['总盈亏'], orientation='h',
