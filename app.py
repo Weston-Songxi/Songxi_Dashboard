@@ -18,44 +18,20 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. CSS 样式 (V13 终极版: 防截断+紧凑+美观)
+# 2. CSS 样式 (保持 V13 布局)
 # ==========================================
 st.markdown("""
     <style>
-    /* 全局间距微调 */
     .block-container { padding-top: 1rem; padding-bottom: 3rem; }
-    
-    /* Header 容器: 左对齐，右侧留白防系统按钮遮挡 */
-    .header-wrapper {
-        display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
-        flex-wrap: wrap; gap: 30px; width: 100%; margin-bottom: 10px;
-        border-bottom: 1px solid #f0f0f0; padding-bottom: 15px; padding-right: 60px;
-    }
-    
-    /* 标题样式 */
+    .header-wrapper { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 30px; width: 100%; margin-bottom: 10px; border-bottom: 1px solid #f0f0f0; padding-bottom: 15px; padding-right: 60px; }
     .header-left { flex-shrink: 0; max-width: 100%; }
-    .main-title {
-        font-size: 2.4rem; font-weight: 800; color: #2c3e50; margin: 0; line-height: 1.1;
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; white-space: nowrap;
-    }
-    /* 移动端适配 */
+    .main-title { font-size: 2.4rem; font-weight: 800; color: #2c3e50; margin: 0; line-height: 1.1; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; white-space: nowrap; }
     @media (max-width: 800px) { .main-title { white-space: normal; font-size: 2rem; } }
-    
     .sub-info { font-size: 0.95rem; color: #7f8c8d; margin-top: 5px; font-weight: 400; }
-    
-    /* 指标卡片区域 */
     .header-right { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-    
-    /* 卡片核心样式 */
-    .kpi-box {
-        border: 1px solid #e1e4e8; border-radius: 8px; padding: 0 15px; min-width: 100px; height: 75px;
-        display: flex; flex-direction: column; justify-content: center; align-items: center;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.03); transition: all 0.3s ease; position: relative; overflow: hidden;
-    }
+    .kpi-box { border: 1px solid #e1e4e8; border-radius: 8px; padding: 0 15px; min-width: 100px; height: 75px; display: flex; flex-direction: column; justify-content: center; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.03); transition: all 0.3s ease; position: relative; overflow: hidden; }
     .kpi-label { font-size: 0.85rem; margin-bottom: 3px; font-weight: 600; z-index: 2; }
     .kpi-value { font-size: 1.35rem; font-weight: 700; line-height: 1.1; white-space: nowrap; z-index: 2; }
-    
-    /* Radio Button 横向排列优化 */
     div.stRadio > div { display: flex; gap: 0px; align-items: center; }
     div.stRadio > div label { margin-right: 15px; cursor: pointer; }
     .plotly-notifier { display: none; }
@@ -69,43 +45,48 @@ st.markdown("""
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
-    """读取数据，带空值保护和类型转换"""
+    """读取数据，增强健壮性"""
     try:
-        # ttl=0 确保每次刷新都从云端拉取最新数据
+        # ttl=0 确保不缓存
         df = conn.read(ttl=0)
         
-        # 如果表是空的（只有列名），返回空DF结构
+        # 空表处理
         if len(df) == 0:
             return pd.DataFrame(columns=['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason'])
             
-        # 数据清洗
-        df['Date'] = pd.to_datetime(df['Date'])
+        # 强制类型转换 (修复 TypeError 的关键)
+        # 1. 确保日期列真的是日期类型，错误的转为 NaT
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        # 2. 删除日期无效的行（防止空行报错）
+        df = df.dropna(subset=['Date'])
+        # 3. 确保数值列是数字，非数字转为 0
         df['Shares'] = pd.to_numeric(df['Shares'], errors='coerce').fillna(0)
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
-        # 确保 Ticker 大写且去除空格
+        # 4. 字符串清洗
         df['Ticker'] = df['Ticker'].astype(str).str.upper().str.strip()
+        
         return df
-    except Exception:
-        # 如果读取完全失败（比如断网或未配置Secrets），返回空结构防止报错
+    except Exception as e:
+        # 捕获连接错误，防止页面崩溃
+        st.error(f"数据读取错误: {str(e)}")
         return pd.DataFrame(columns=['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason'])
 
 def save_transaction(new_row_dict):
-    """追加新交易到云端"""
+    """保存数据"""
     try:
         current_df = conn.read(ttl=0)
         new_row_df = pd.DataFrame([new_row_dict])
         updated_df = pd.concat([current_df, new_row_df], ignore_index=True)
         conn.update(data=updated_df)
-        st.cache_data.clear() # 清除缓存
+        st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"写入失败: {e}")
         return False
 
 def clear_all_data():
-    """清空所有数据 (危险操作)"""
+    """清空数据"""
     try:
-        # 覆盖写入一个仅包含表头的空 DataFrame
         empty_df = pd.DataFrame(columns=['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason'])
         conn.update(data=empty_df)
         st.cache_data.clear()
@@ -115,21 +96,37 @@ def clear_all_data():
         return False
 
 # ==========================================
-# 4. 金融计算引擎
+# 4. 金融计算引擎 (修复 TypeError)
 # ==========================================
 
 def get_price_history(tickers, start_date):
+    """获取价格，修复单一股票返回 Series 导致的报错"""
     if not tickers: return pd.DataFrame()
+    
+    # 确保 tickers 集合非空且去重
     all_tickers = list(set(tickers) | {'SPY'}) 
     if 'CASH' in all_tickers: all_tickers.remove('CASH')
+    
     if not all_tickers: return pd.DataFrame()
 
     with st.spinner('🔄 同步 TMT 市场数据...'):
         try:
-            buffer_date = start_date - pd.Timedelta(days=400) 
+            # 确保 start_date 是 pd.Timestamp 类型
+            start_ts = pd.to_datetime(start_date)
+            buffer_date = start_ts - pd.Timedelta(days=400)
+            
+            # 下载数据
             data = yf.download(all_tickers, start=buffer_date, progress=False)['Close']
+            
+            # 【关键修复】如果只有 1 个代码，yfinance 返回 Series，强制转为 DataFrame
+            if isinstance(data, pd.Series):
+                data = data.to_frame()
+                data.columns = all_tickers # 重命名列
+                
+            # 时区处理
             if data.index.tz is not None:
                 data.index = data.index.tz_localize(None)
+            
             data = data.fillna(method='ffill')
             return data
         except Exception:
@@ -138,12 +135,15 @@ def get_price_history(tickers, start_date):
 def calculate_full_history(df_trans, price_data, sys_start_date):
     if df_trans.empty: return pd.DataFrame(), {}, 0
     
+    # 确保 sys_start_date 统一为 pd.Timestamp 以避免比较错误
+    sys_start_ts = pd.to_datetime(sys_start_date)
+    
     df_trans = df_trans.sort_values('Date')
     end_date = datetime.now()
-    full_dates = pd.date_range(start=sys_start_date, end=end_date, freq='D')
+    full_dates = pd.date_range(start=sys_start_ts, end=end_date, freq='D')
     
-    past_trans = df_trans[df_trans['Date'] < sys_start_date]
-    curr_trans = df_trans[df_trans['Date'] >= sys_start_date].copy()
+    past_trans = df_trans[df_trans['Date'] < sys_start_ts]
+    curr_trans = df_trans[df_trans['Date'] >= sys_start_ts].copy()
     curr_trans['Date_Norm'] = curr_trans['Date'].dt.normalize()
     trans_grouped = curr_trans.groupby('Date_Norm')
     
@@ -159,14 +159,12 @@ def calculate_full_history(df_trans, price_data, sys_start_date):
             c += (abs(s) * p); h[t] = h.get(t, 0) + s
         return c, h
 
-    # 处理历史持仓
     for _, row in past_trans.iterrows():
         cash, holdings = process_tx(cash, holdings, row)
 
     nav_history = []
     daily_snapshots = {} 
     
-    # 逐日计算净值
     for d in full_dates:
         d_norm = d.normalize()
         if d_norm in trans_grouped.groups:
@@ -179,12 +177,17 @@ def calculate_full_history(df_trans, price_data, sys_start_date):
         
         if has_price:
             for t, s in holdings.items():
-                if abs(s) > 0.001 and t in price_data.columns:
-                    mkt_val += s * price_data.loc[d_norm, t]
+                if abs(s) > 0.001:
+                    # 【关键修复】检查列是否存在，避免 KeyError/AttributeError
+                    if t in price_data.columns:
+                        mkt_val += s * price_data.loc[d_norm, t]
+            
+            spy_val = price_data.loc[d_norm, 'SPY'] if 'SPY' in price_data.columns else 0
+            
             total_assets = cash + mkt_val
             nav_history.append({
                 'Date': d_norm, 'Total Assets': total_assets, 'Cash': cash, 'Market Value': mkt_val,
-                'SPY': price_data.loc[d_norm, 'SPY'] if 'SPY' in price_data.columns else 0
+                'SPY': spy_val
             })
         elif price_data.empty:
              nav_history.append({
@@ -196,17 +199,17 @@ def calculate_full_history(df_trans, price_data, sys_start_date):
     return df_nav, daily_snapshots, cash
 
 def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_date, end_date):
-    """计算区间归因"""
-    start_date = pd.to_datetime(start_date)
-    end_date = pd.to_datetime(end_date)
+    start_ts = pd.to_datetime(start_date)
+    end_ts = pd.to_datetime(end_date)
+    
     valid_dates = sorted(daily_snapshots.keys())
     if not valid_dates: return pd.DataFrame(), 0
     
     def get_closest_date(target, dates):
         return min(dates, key=lambda x: abs(x - target))
     
-    actual_start = get_closest_date(start_date, valid_dates)
-    actual_end = get_closest_date(end_date, valid_dates)
+    actual_start = get_closest_date(start_ts, valid_dates)
+    actual_end = get_closest_date(end_ts, valid_dates)
     if actual_start > actual_end: actual_start = actual_end
 
     holdings_start, _ = daily_snapshots[actual_start]
@@ -214,6 +217,7 @@ def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_da
     
     if price_data.empty: return pd.DataFrame(), cash_end
     
+    # 价格数据索引对齐
     price_idx = price_data.index
     p_start_idx = price_idx[price_idx <= actual_start]
     p_end_idx = price_idx[price_idx <= actual_end]
@@ -230,10 +234,14 @@ def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_da
     
     perf_stats = []
     for t in all_tickers:
+        # 获取价格，缺省为 0
+        p_s = prices_start.get(t, 0) if isinstance(prices_start, pd.Series) else 0
+        p_e = prices_end.get(t, 0) if isinstance(prices_end, pd.Series) else 0
+        
         qty_s = holdings_start.get(t, 0)
-        val_s = qty_s * prices_start.get(t, 0) if t in prices_start else 0
+        val_s = qty_s * p_s
         qty_e = holdings_end.get(t, 0)
-        val_e = qty_e * prices_end.get(t, 0) if t in prices_end else 0
+        val_e = qty_e * p_e
         
         t_tx = period_trans[period_trans['Ticker'] == t]
         buys = t_tx[t_tx['Action'] == 'BUY']
@@ -258,31 +266,29 @@ def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_da
     return df_perf, cash_end
 
 # ==========================================
-# 5. 数据加载与初始化
+# 5. 主程序逻辑
 # ==========================================
 
+# A. 加载数据
 df_trans = load_data()
 
-# 智能判断系统成立日期 (防止用户录入了2022年的数据但系统从2023年开始算)
+# 智能日期处理
 if not df_trans.empty:
     min_db_date = df_trans['Date'].min().date()
-    # 默认 session_state 可能不存在，或者用户可能手动改过，这里做自适应
     if 'sys_start_date' not in st.session_state:
         st.session_state['sys_start_date'] = min_db_date
     elif st.session_state['sys_start_date'] > min_db_date:
         st.session_state['sys_start_date'] = min_db_date
 else:
-    # 假如是空表
     if 'sys_start_date' not in st.session_state:
         st.session_state['sys_start_date'] = date.today()
 
 # ==========================================
-# 6. 侧边栏 (Input & Settings)
+# 6. 侧边栏
 # ==========================================
 with st.sidebar:
     st.title("🌲 松熙基金工作台")
     
-    # --- A. 交易录入 ---
     st.header("📝 交易录入")
     with st.form("trade_form"):
         col1, col2 = st.columns(2)
@@ -303,50 +309,44 @@ with st.sidebar:
                 new_trade = {
                     'Date': tx_date.strftime('%Y-%m-%d'),
                     'Ticker': tx_ticker if tx_ticker else 'CASH',
-                    'Action': real_action, 'Shares': shares_final, 'Price': tx_price, 'Reason': tx_reason
+                    'Action': real_action,
+                    'Shares': shares_final,
+                    'Price': tx_price,
+                    'Reason': tx_reason
                 }
                 with st.spinner("☁️ 正在同步..."):
                     if save_transaction(new_trade):
                         st.success("已保存！"); st.rerun()
 
     st.divider()
-
-    # --- B. 系统设置 & 数据管理 ---
     with st.expander("⚙️ 数据管理", expanded=False):
-        new_start_date = st.date_input("成立日期 (覆盖)", st.session_state['sys_start_date'])
+        new_start_date = st.date_input("成立日期", st.session_state['sys_start_date'])
         if new_start_date != st.session_state['sys_start_date']:
             st.session_state['sys_start_date'] = new_start_date
             st.rerun()
-            
         st.markdown("---")
-        st.warning("⚠️ 危险操作")
         if st.button("🗑️ 清空所有数据", type="primary", use_container_width=True):
             st.session_state['confirm_reset'] = True
-            
         if st.session_state.get('confirm_reset'):
-            st.error("确定清空 Google Sheets？无法恢复！")
+            st.warning("确认清空？")
             c1, c2 = st.columns(2)
-            if c1.button("✅ 确认"):
-                if clear_all_data():
-                    st.session_state['confirm_reset'] = False
-                    st.rerun()
-            if c2.button("❌ 取消"):
-                st.session_state['confirm_reset'] = False
-                st.rerun()
+            if c1.button("✅ 是"):
+                if clear_all_data(): st.session_state['confirm_reset'] = False; st.rerun()
+            if c2.button("❌ 否"):
+                st.session_state['confirm_reset'] = False; st.rerun()
 
 # ==========================================
-# 7. 主界面渲染
+# 7. 主界面
 # ==========================================
 
-# 首次引导 (空数据)
 if df_trans.empty:
-    st.info("👋 欢迎使用！目前数据库为空。请在左侧录入第一笔资金 (如代码填 CASH, 动作选 DEPOSIT, 价格 1)。")
+    st.info("👋 欢迎！数据库为空。请先在左侧录入第一笔资金（如 Ticker: CASH, Action: DEPOSIT）。")
     st.stop()
 
 tickers = df_trans[df_trans['Ticker']!='CASH']['Ticker'].unique().tolist()
 price_data = get_price_history(tickers, st.session_state['sys_start_date'])
 
-# 全量计算 (Header用)
+# 计算全历史
 df_nav_full, daily_snapshots, _ = calculate_full_history(df_trans, price_data, st.session_state['sys_start_date'])
 
 # --- Header 数据 ---
@@ -367,7 +367,6 @@ if not df_nav_full.empty:
 else:
     net_assets_str = "-"; date_str = "-"; net_exp_val = 0; rets = {'1W':None, '1M':None, '1Y':None}
 
-# --- 样式生成 ---
 def get_card_style(val):
     if val is None: return 'background-color: #fff;', '#95a5a6', '#95a5a6', 'N/A'
     pct = val * 100; abs_pct = abs(pct); opacity = min(max(abs_pct / 20, 0.1), 1.0) 
@@ -383,7 +382,7 @@ exp_pct = min(max(net_exp_val, 0), 100)
 style_exp = f"background: linear-gradient(to top, #e0e0e0 {exp_pct}%, #ffffff {exp_pct}%);"
 color_exp = "#2c3e50" 
 
-# --- Header HTML ---
+# HTML
 html_parts = []
 html_parts.append('<div class="header-wrapper">')
 html_parts.append('<div class="header-left">')
@@ -398,7 +397,7 @@ html_parts.append(f'<div class="kpi-box" style="{s_1y}"><div class="kpi-label" s
 html_parts.append('</div></div>')
 st.markdown("".join(html_parts), unsafe_allow_html=True)
 
-# --- 时间筛选 ---
+# 筛选
 st.write("") 
 c_filter_type, c_filter_date = st.columns([3, 4])
 with c_filter_type:
@@ -452,7 +451,6 @@ with tab1:
             if 'SPY' in plot_df:
                 fig_nav.add_trace(go.Scatter(x=plot_df.index, y=plot_df['纳斯达克100'], name='Ref Index', line=dict(color='#BDC3C7', dash='dot')))
             
-            # Buy/Sell Markers Logic
             visible_trades = df_trans_filtered[df_trans_filtered['Ticker'] != 'CASH'].copy()
             if not visible_trades.empty:
                 visible_trades['Date_Norm'] = visible_trades['Date'].dt.normalize()
