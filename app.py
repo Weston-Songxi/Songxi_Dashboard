@@ -258,6 +258,14 @@ else:
     if 'sys_start_date' not in st.session_state: st.session_state['sys_start_date'] = date.today()
 
 # ==========================================
+if not df_trans.empty:
+    tickers = df_trans[df_trans['Ticker']!='CASH']['Ticker'].unique().tolist()
+    price_data = get_price_history(tickers, st.session_state['sys_start_date'])
+    # 计算全局净值和快照
+    df_nav_full, daily_snapshots, current_cash = calculate_full_history(df_trans, price_data, st.session_state['sys_start_date'])
+else:
+    df_nav_full = pd.DataFrame()
+    daily_snapshots = {}
 # ==========================================
 # 6. 重构后的侧边栏：支持比例下单与预览
 # ==========================================
@@ -600,6 +608,7 @@ with tab3:
         display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
         st.dataframe(display_df[['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Reason']], use_container_width=True, hide_index=True)
     else: st.info("无交易")
+
 
 
 
