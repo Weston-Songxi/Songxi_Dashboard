@@ -161,9 +161,17 @@ def get_price_history(tickers, start_date):
             # 统一为日频并补齐自然日，前向填充，保证净值曲线连续
             data.index = pd.to_datetime(data.index).normalize()
             data = data[~data.index.duplicated(keep="last")].sort_index()
+
+            # FIX 8: 只填充到「最后一个有真实收盘价的日期」，不强制延伸到今天。
+            # 原因：若今日市场尚未收盘或 yfinance 数据未更新，
+            #        ffill 会用昨日价格填充今日，导致净值曲线末端
+            #        出现连续两天完全相同的值（视觉上像 bug）。
+            # 用 dropna(how='all') 找到最后一个至少有一只标的有价格的日期，
+            # 以此为终点，保证图表只展示有真实价格支撑的区间。
+            last_real_date = data.dropna(how="all").index.max()
             daily_idx = pd.date_range(
                 start=data.index.min(),
-                end=pd.Timestamp.today().normalize(),
+                end=last_real_date,
                 freq="D"
             )
             data = data.reindex(daily_idx).ffill()
@@ -196,7 +204,13 @@ def calculate_full_history(df_trans, price_data, sys_start_date):
     sys_start_ts = pd.to_datetime(sys_start_date).normalize()
     df_trans = df_trans.sort_values("Date").copy()
     df_trans["Date_Norm"] = pd.to_datetime(df_trans["Date"]).dt.normalize()
-    end_date = pd.Timestamp.today().normalize()
+    # FIX 8 (配套)：净值曲线的终点与 price_data 保持一致。
+    # price_data 已截止到最后一个真实收盘日，这里用它的 max index 作为终点，
+    # 确保不会出现「末尾两天净值完全相同」的情况。
+    if not price_data.empty:
+        end_date = price_data.index.max()
+    else:
+        end_date = pd.Timestamp.today().normalize()
     full_dates = pd.date_range(start=sys_start_ts, end=end_date, freq="D")
     past_trans = df_trans[df_trans["Date_Norm"] < sys_start_ts]
     curr_trans = df_trans[df_trans["Date_Norm"] >= sys_start_ts]
