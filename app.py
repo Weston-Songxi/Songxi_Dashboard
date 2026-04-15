@@ -357,37 +357,73 @@ def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_da
 
 def calculate_vwap_cost_basis(df_trans):
     """
-    计算每个当前持仓标的的加权平均成本价 (VWAP)。
+    计算每个当前持仓标的的加权平均建仓价 (VWAP)，同时支持多头与空头。
 
-    算法（VWAP 法）：
-    - BUY：累计加权成本和持仓量
-    - SELL：按当前 VWAP 比例扣减成本（剩余股份均价不变）
-    - 若某标的持仓量接近 0，则视为已平仓，不纳入结果
+    返回值：dict，key=Ticker，value=(vwap_price, direction)
+        direction: "多头" | "空头"
+
+    核心规则
+    ────────
+    • net_shares > 0 → 多头；< 0 → 空头；= 0 → 无仓位
+    • open_cost 始终表示当前持仓的「建仓总成本」（正值）
+      - 多头：BUY 的价格 × 股数之和
+      - 空头：SELL 的价格 × 股数之和（做空时收到的对价）
+    • 加仓（同方向扩大）：追加成本
+    • 减仓（同方向缩小）：按比例缩减成本，均价不变
+    • 完全平仓：成本归零
+    • 仓位穿越零点（多翻空 / 空翻多）：
+        - 原仓位全部平掉，成本清零
+        - 超额部分以当笔价格作为新仓位成本
     """
     result = {}
     tickers = df_trans[df_trans["Ticker"] != "CASH"]["Ticker"].unique()
+
     for ticker in tickers:
         ticker_trans = (
             df_trans[df_trans["Ticker"] == ticker]
             .sort_values("Date")
         )
-        total_cost = 0.0
-        total_shares = 0.0
+        net_shares = 0.0   # 正 = 多头, 负 = 空头
+        open_cost  = 0.0   # 当前仓位的建仓总成本（始终 >= 0）
+
         for _, row in ticker_trans.iterrows():
-            s = float(row["Shares"])
+            s = float(row["Shares"])   # BUY 为正, SELL 为负
             p = float(row["Price"])
-            if row["Action"] == "BUY":
-                total_cost += s * p
-                total_shares += s
-            elif row["Action"] == "SELL":
-                # SELL 的 shares 为负数，abs 取卖出量
-                sell_qty = abs(s)
-                if total_shares > 0:
-                    cost_per_share = total_cost / total_shares
-                    total_cost -= sell_qty * cost_per_share
-                    total_shares -= sell_qty
-        if total_shares > 0.001:
-            result[ticker] = total_cost / total_shares
+            prev_net = net_shares
+            new_net  = prev_net + s
+
+            # ── 情况 1：当前无仓位 → 直接开新仓 ──────────────────
+            if abs(prev_net) < 1e-6:
+                net_shares = new_net
+                open_cost  = abs(s) * p
+
+            # ── 情况 2：完全平仓（新净持仓趋近 0）────────────────
+            elif abs(new_net) < 1e-6:
+                net_shares = 0.0
+                open_cost  = 0.0
+
+            # ── 情况 3：同向操作（方向未变且未归零）──────────────
+            elif (prev_net > 0) == (new_net > 0):
+                if abs(new_net) > abs(prev_net):
+                    # 加仓：追加建仓成本
+                    open_cost += abs(s) * p
+                else:
+                    # 减仓：按剩余比例缩减成本（均价不变）
+                    open_cost *= abs(new_net) / abs(prev_net)
+                net_shares = new_net
+
+            # ── 情况 4：仓位穿越零点（方向翻转）─────────────────
+            else:
+                # 超额部分 = 翻转后的新仓位大小
+                residual_qty = abs(new_net)
+                open_cost    = residual_qty * p   # 新仓位以当笔价格为成本
+                net_shares   = new_net
+
+        if abs(net_shares) > 1e-6:
+            vwap      = open_cost / abs(net_shares)
+            direction = "多头" if net_shares > 0 else "空头"
+            result[ticker] = (vwap, direction)
+
     return result
 
 # ==========================================
@@ -847,6 +883,7 @@ with tab1:
 
                 else:
                     # ── 成本 vs 现价：VWAP 浮盈亏图 + 明细表 ──────────
+                    # 返回值：{ticker: (vwap_price, "多头"|"空头")}
                     vwap_costs = calculate_vwap_cost_basis(df_trans)
 
                     # 取 price_data 最后一行作为现价基准
@@ -859,31 +896,53 @@ with tab1:
                         ticker = pd_row["Ticker"]
                         if ticker == "CASH":
                             continue
-                        vwap = vwap_costs.get(ticker)
+                        cost_info = vwap_costs.get(ticker)
                         cur_px = latest_prices.get(ticker)
-                        if vwap and vwap > 0 and cur_px and cur_px > 0:
+                        if not cost_info or not cur_px or cur_px <= 0:
+                            continue
+                        vwap, direction = cost_info
+
+                        # PnL 方向因多空而异
+                        # 多头：现价 > 成本 → 盈利
+                        # 空头：现价 < 做空均价 → 盈利（方向相反）
+                        if direction == "多头":
                             pnl_pct = (cur_px - vwap) / vwap * 100
                             pnl_abs = (cur_px - vwap) * abs(pd_row["Value"] / cur_px)
-                            cost_rows.append({
-                                "代码":    ticker,
-                                "VWAP成本": round(vwap, 2),
-                                "现价":    round(cur_px, 2),
-                                "浮盈亏%": pnl_pct,
-                                "浮盈亏$": pnl_abs,
-                                "持仓量":  round(pd_row["Value"] / cur_px, 2),
-                                "市值":    pd_row["Value"],
-                            })
+                            ref_label = "成本均价"
+                        else:  # 空头
+                            pnl_pct = (vwap - cur_px) / vwap * 100
+                            pnl_abs = (vwap - cur_px) * abs(pd_row["Value"] / cur_px)
+                            ref_label = "做空均价"
+
+                        cost_rows.append({
+                            "代码":      ticker,
+                            "方向":      direction,
+                            "参考价格":  ref_label,
+                            "建仓均价":  round(vwap, 2),
+                            "现价":      round(cur_px, 2),
+                            "浮盈亏%":   pnl_pct,
+                            "浮盈亏$":   pnl_abs,
+                            "持仓量":    round(abs(pd_row["Value"]) / cur_px, 2),
+                            "市值":      pd_row["Value"],
+                        })
 
                     if cost_rows:
                         df_cost = pd.DataFrame(cost_rows).sort_values("浮盈亏%", ascending=True)
 
-                        # 横向浮盈亏柱状图
+                        # Y 轴标签：代码 + 方向标识（[空] / [多]）
+                        df_cost["标签"] = df_cost.apply(
+                            lambda r: f"{r['代码']}  [{'空' if r['方向'] == '空头' else '多'}]",
+                            axis=1
+                        )
+
+                        # 颜色：A 股配色（红涨绿跌），多空方向已在 pnl_pct 中修正
                         bar_colors = [
                             "#E74C3C" if v >= 0 else "#2ECC71"
                             for v in df_cost["浮盈亏%"]
                         ]
+
                         fig_cost = go.Figure(go.Bar(
-                            y=df_cost["代码"],
+                            y=df_cost["标签"],
                             x=df_cost["浮盈亏%"],
                             orientation="h",
                             marker_color=bar_colors,
@@ -895,10 +954,12 @@ with tab1:
                             ],
                             textposition="outside",
                             textfont=dict(family="Arial Black", size=13, color="black"),
-                            customdata=df_cost[["VWAP成本", "现价", "浮盈亏$"]].values,
+                            customdata=df_cost[[
+                                "建仓均价", "现价", "浮盈亏$", "方向", "参考价格"
+                            ]].values,
                             hovertemplate=(
-                                "<b>%{y}</b><br>"
-                                "VWAP成本: $%{customdata[0]:,.2f}<br>"
+                                "<b>%{y}</b>  (%{customdata[3]})<br>"
+                                "%{customdata[4]}: $%{customdata[0]:,.2f}<br>"
                                 "现价: $%{customdata[1]:,.2f}<br>"
                                 "浮盈亏: %{x:+.1f}%  ($%{customdata[2]:,.0f})"
                                 "<extra></extra>"
@@ -908,30 +969,33 @@ with tab1:
                         max_abs = df_cost["浮盈亏%"].abs().max()
                         buf = max(max_abs * 1.35, 5)
                         fig_cost.update_layout(
-                            height=max(260, len(cost_rows) * 52 + 60),
+                            height=max(260, len(cost_rows) * 56 + 60),
                             margin=dict(t=20, b=20, l=10, r=60),
                             xaxis=dict(
                                 range=[-buf, buf],
                                 showgrid=True, gridcolor="#f0f0f0",
-                                title="浮盈亏 %"
+                                title="浮盈亏 %（多头：现价-成本；空头：做空价-现价）"
                             ),
                             yaxis=dict(
                                 showgrid=False,
-                                tickfont=dict(size=14, color="black", family="Arial Black")
+                                tickfont=dict(size=13, color="black", family="Arial Black")
                             ),
                             plot_bgcolor="rgba(0,0,0,0)",
                         )
                         st.plotly_chart(fig_cost, use_container_width=True)
 
                         # 持仓明细表
-                        display_cost = df_cost.copy()
+                        display_cost = df_cost[[
+                            "代码", "方向", "参考价格", "建仓均价",
+                            "现价", "浮盈亏%", "浮盈亏$", "持仓量", "市值"
+                        ]].copy()
                         display_cost["浮盈亏%"] = display_cost["浮盈亏%"].map(
                             lambda v: f"{'+' if v >= 0 else ''}{v:.1f}%"
                         )
                         display_cost["浮盈亏$"] = display_cost["浮盈亏$"].map(
                             lambda v: f"{'+' if v >= 0 else ''}{v:,.0f}"
                         )
-                        display_cost["VWAP成本"] = display_cost["VWAP成本"].map(
+                        display_cost["建仓均价"] = display_cost["建仓均价"].map(
                             lambda v: f"${v:,.2f}"
                         )
                         display_cost["现价"] = display_cost["现价"].map(
@@ -940,16 +1004,15 @@ with tab1:
                         display_cost["市值"] = display_cost["市值"].map(
                             lambda v: f"${v:,.0f}"
                         )
+                        # 将"参考价格"列合并进列名展示，避免冗余
+                        display_cost = display_cost.rename(columns={"建仓均价": "建仓均价(VWAP)"})
                         st.dataframe(
-                            display_cost[[
-                                "代码", "VWAP成本", "现价",
-                                "浮盈亏%", "浮盈亏$", "持仓量", "市值"
-                            ]],
+                            display_cost,
                             use_container_width=True,
                             hide_index=True
                         )
                     else:
-                        st.info("暂无可计算成本的持仓（需有 BUY 记录）")
+                        st.info("暂无可计算成本的持仓")
             else:
                 st.info("期末为空仓")
         else:
