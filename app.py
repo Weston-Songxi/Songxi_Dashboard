@@ -29,8 +29,8 @@ st.markdown("""
     }
     .stApp { background: #f4f5f7; }
     .block-container {
-        padding-top: 1.1rem;
-        padding-bottom: 2.4rem;
+        padding-top: 0.7rem;
+        padding-bottom: 2rem;
         max-width: min(1680px, 100%);
     }
     [data-testid="stSidebar"] {
@@ -42,7 +42,7 @@ st.markdown("""
     .header-wrapper {
         display: flex; flex-direction: row; align-items: center; justify-content: space-between;
         flex-wrap: wrap; gap: 18px 28px; width: 100%; margin-bottom: 6px;
-        border-bottom: 1px solid #e6e8ec; padding-bottom: 14px;
+        border-bottom: 1px solid #e6e8ec; padding-bottom: 10px;
     }
     .header-left { flex-shrink: 0; max-width: 100%; }
     .main-title {
@@ -92,13 +92,24 @@ C_SPY = "#9AA3AD"
 C_DD = "#C47A2C"
 
 
+def fmt_money(v, digits=0):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return "—"
+    if pd.isna(x):
+        return "—"
+    sign = "-" if x < 0 else ""
+    return f"{sign}${abs(x):,.{digits}f}"
+
+
 def apply_chart_style(fig, height=420, showlegend=True):
     fig.update_layout(
         height=height,
         font=CHART_FONT,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#ffffff",
-        margin=dict(l=12, r=18, t=28, b=12),
+        margin=dict(l=16, r=18, t=24, b=12),
         showlegend=showlegend,
         legend=dict(
             orientation="h", y=1.08, x=0, bgcolor="rgba(0,0,0,0)",
@@ -588,7 +599,7 @@ else:
 with st.sidebar:
     st.markdown("##### 松熙 · 工作台")
     st.caption("模拟仓录入与刷新")
-    if st.button("🔄 刷新数据", use_container_width=True):
+    if st.button("刷新数据", use_container_width=True):
         load_data.clear()
         try:
             _download_price_history.clear()
@@ -607,6 +618,37 @@ with st.sidebar:
         current_nav = 0.0
         current_cash_balance = 0.0
         current_holdings = {}
+
+    if current_holdings:
+        px_row = price_data.iloc[-1] if not price_data.empty else pd.Series(dtype=float)
+        snap_rows = []
+        for tkr, sh in current_holdings.items():
+            if abs(sh) < 0.001:
+                continue
+            px = None
+            if isinstance(px_row, pd.Series) and tkr in px_row.index:
+                raw_p = px_row.get(tkr)
+                if pd.notna(raw_p) and float(raw_p) > 0:
+                    px = float(raw_p)
+            if px is None:
+                continue
+            mv = sh * px
+            w = (mv / current_nav * 100) if current_nav else 0.0
+            snap_rows.append({"代码": tkr, "数量": sh, "权重": w})
+        if snap_rows:
+            snap = pd.DataFrame(snap_rows)
+            snap = snap.assign(_a=snap["权重"].abs()).sort_values("_a", ascending=False).drop(columns="_a")
+            with st.expander("当前仓位", expanded=True):
+                st.dataframe(
+                    snap,
+                    hide_index=True,
+                    use_container_width=True,
+                    height=min(240, 38 + len(snap) * 32),
+                    column_config={
+                        "数量": st.column_config.NumberColumn(format="%.0f"),
+                        "权重": st.column_config.NumberColumn(format="%+.1f%%"),
+                    },
+                )
 
     input_mode = st.radio("计算方式", ["按股数", "按净资产比例 %"], horizontal=True)
     with st.container(border=True):
@@ -652,7 +694,7 @@ with st.sidebar:
                 st.warning("无法计算：请检查价格或净资产是否大于0")
         tx_reason = st.text_area("投资逻辑", height=68, placeholder="输入买入/做空理由...")
 
-    if st.button("🔍 预览交易", use_container_width=True, type="primary"):
+    if st.button("预览交易", use_container_width=True, type="primary"):
         if not tx_ticker and "DEPOSIT" not in tx_action:
             st.error("请输入股票代码")
         elif final_shares == 0 and "DEPOSIT" not in tx_action:
@@ -736,7 +778,7 @@ if not df_nav_full.empty:
     nav = float(latest["Total Assets"])
     cash_now = float(latest["Cash"]) if "Cash" in latest.index else 0.0
     mkt_now = float(latest["Market Value"]) if "Market Value" in latest.index else 0.0
-    net_assets_str = f"${nav:,.0f}"
+    net_assets_str = fmt_money(nav)
     date_str = latest.name.strftime("%Y-%m-%d")
     init_nav = float(df_nav_full["Total Assets"].iloc[0])
     since_incept = nav - init_nav
@@ -784,6 +826,7 @@ else:
     gross_exp_val = 0.0
     since_incept = 0.0
     since_incept_pct = 0.0
+    spy_xs = None
     rets = {"1W": None, "1M": None, "1Y": None}
 
 def get_card_style(val):
@@ -817,17 +860,24 @@ style_exp = f"background: linear-gradient(to top, #e0e0e0 {exp_pct}%, #ffffff {e
 color_exp = "#2c3e50"
 gross_fill = min(max(gross_exp_val, 0), 160)
 style_gross = f"background: linear-gradient(to top, #dfe6e9 {min(gross_fill, 100)}%, #ffffff {min(gross_fill, 100)}%);"
-cash_str = f"${cash_now:,.0f}"
+cash_str = fmt_money(cash_now)
 incept_sign = "+" if since_incept >= 0 else ""
-incept_str = f"{incept_sign}${since_incept:,.0f} ({since_incept_pct*100:+.1f}%)"
-cash_note = "杠杆" if cash_now < -0.5 else "现金"
+incept_str = f"{fmt_money(since_incept)} ({since_incept_pct*100:+.1f}%)"
+cash_note = "现金（杠杆）" if cash_now < -0.5 else "现金"
+spy_xs = None
+if not df_nav_full.empty and "SPY" in df_nav_full.columns:
+    spy_s = df_nav_full["SPY"].dropna()
+    if len(spy_s) >= 2 and float(spy_s.iloc[0]) > 0:
+        spy_xs = since_incept_pct - (float(spy_s.iloc[-1]) / float(spy_s.iloc[0]) - 1.0)
 
 html_parts = []
 html_parts.append('<div class="header-wrapper">')
 html_parts.append('<div class="header-left">')
 html_parts.append('<h1 class="main-title">松熙 TMT 模拟仓</h1>')
 html_parts.append(
-    f'<div class="sub-info">{date_str}&nbsp;&nbsp;·&nbsp;&nbsp;净值 {net_assets_str}&nbsp;&nbsp;·&nbsp;&nbsp;{cash_note} {cash_str} ({cash_pct:+.1f}%)</div>'
+    f'<div class="sub-info">{date_str}&nbsp;&nbsp;·&nbsp;&nbsp;净值 {net_assets_str}&nbsp;&nbsp;·&nbsp;&nbsp;{cash_note} {cash_str} ({cash_pct:+.1f}%)'
+    + (f'&nbsp;&nbsp;·&nbsp;&nbsp;相对 SPY {spy_xs*100:+.1f}pp' if spy_xs is not None else '')
+    + '</div>'
 )
 html_parts.append("</div>")
 html_parts.append('<div class="header-right">')
@@ -840,14 +890,13 @@ html_parts.append("</div></div>")
 st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 # 筛选
-st.write("")
-_PERIODS = ["近 1 月", "近 3 月", "近 1 年", "本年至今 (YTD)", "成立至今 (ALL)", "自定义"]
+_PERIODS = ["1月", "3月", "1年", "YTD", "ALL", "自定义"]
 c_filter_type, c_filter_date = st.columns([3, 2])
 with c_filter_type:
     if hasattr(st, "pills"):
-        time_range = st.pills("观察周期", _PERIODS, default="近 1 月", label_visibility="collapsed")
+        time_range = st.pills("观察周期", _PERIODS, default="1月", label_visibility="collapsed")
         if not time_range:
-            time_range = "近 1 月"
+            time_range = "1月"
     else:
         time_range = st.radio(
             "观察周期",
@@ -864,13 +913,13 @@ if time_range == "自定义":
         start_filter = c_start.date_input("开始", start_filter, label_visibility="collapsed")
         end_filter = c_end.date_input("结束", today, label_visibility="collapsed")
 else:
-    if time_range == "本年至今 (YTD)":
+    if time_range in ("YTD", "本年至今 (YTD)"):
         start_filter = max(date(today.year, 1, 1), start_filter)
-    elif time_range == "近 1 年":
+    elif time_range in ("1年", "近 1 年"):
         start_filter = max(today - timedelta(days=365), start_filter)
-    elif time_range == "近 3 月":
+    elif time_range in ("3月", "近 3 月"):
         start_filter = max(today - timedelta(days=90), start_filter)
-    elif time_range == "近 1 月":
+    elif time_range in ("1月", "近 1 月"):
         start_filter = max(today - timedelta(days=30), start_filter)
 
 filter_start_ts = pd.Timestamp(start_filter)
@@ -890,7 +939,8 @@ mask_trans = (df_trans["Date"] >= filter_start_ts) & (df_trans["Date"] <= filter
 df_trans_filtered = df_trans.loc[mask_trans]
 
 # --- Tabs ---
-st.caption(f"展示区间  {start_filter}  →  {end_filter}")
+if time_range == "自定义":
+    st.caption(f"展示区间  {start_filter}  →  {end_filter}")
 tab1, tab2, tab3, tab4 = st.tabs(["净值", "持仓", "归因", "流水"])
 
 # 期末持仓数据（持仓页 / 成本图共用）
@@ -994,28 +1044,10 @@ with tab1:
                 line=dict(color=C_SPY, width=1.4, dash="dot"),
             ), row=1, col=1)
 
-        if not plot_df.empty:
-            max_idx = plot_df["松熙组合"].idxmax()
-            max_val = plot_df.loc[max_idx, "松熙组合"]
-            min_idx = plot_df["松熙组合"].idxmin()
-            min_val = plot_df.loc[min_idx, "松熙组合"]
-            hi_txt = f"高 {max_val:.1f}" if use_index else f"高 ${max_val:,.0f}"
-            lo_txt = f"低 {min_val:.1f}" if use_index else f"低 ${min_val:,.0f}"
-            fig_nav.add_annotation(
-                x=max_idx, y=max_val, text=hi_txt,
-                showarrow=True, arrowhead=0, arrowwidth=1,
-                arrowcolor="#9B59B6", ax=0, ay=-28,
-                bgcolor="#fff", bordercolor="#e6e8ec", borderwidth=1, borderpad=3,
-                font=dict(size=11, color="#7d3c98"),
-                xref="x", yref="y",
-            )
-            fig_nav.add_annotation(
-                x=min_idx, y=min_val, text=lo_txt,
-                showarrow=True, arrowhead=0, arrowwidth=1,
-                arrowcolor=C_DD, ax=0, ay=28,
-                bgcolor="#fff", bordercolor="#e6e8ec", borderwidth=1, borderpad=3,
-                font=dict(size=11, color=C_DD),
-                xref="x", yref="y",
+        if not use_index:
+            fig_nav.add_hline(
+                y=start_val, line_dash="dot", line_color="#c5c9d0", line_width=1,
+                row=1, col=1,
             )
 
         visible_trades = df_trans_filtered[df_trans_filtered["Ticker"] != "CASH"].copy()
@@ -1073,7 +1105,21 @@ with tab1:
         fig_nav.update_yaxes(title_text="回撤%", row=2, col=1)
         apply_chart_style(fig_nav, height=520)
         st.plotly_chart(fig_nav, use_container_width=True, config={"displayModeBar": False})
-        st.caption("日线用官方收盘，周末不画。盘后成交只进持仓，不改这条曲线。")
+        fund0 = float(plot_df["松熙组合"].iloc[0])
+        fund1 = float(plot_df["松熙组合"].iloc[-1])
+        fund_ret = (fund1 / fund0 - 1.0) if fund0 else 0.0
+        hi_v = float(plot_df["松熙组合"].max())
+        lo_v = float(plot_df["松熙组合"].min())
+        dd_min = float(dd.min()) if dd.notna().any() else 0.0
+        hl = f"高 {hi_v:.1f}  低 {lo_v:.1f}" if use_index else f"高 ${hi_v:,.0f}  低 ${lo_v:,.0f}"
+        cap = f"区间 松熙 {fund_ret*100:+.1f}%"
+        if "标普500(SPY)" in plot_df.columns:
+            ss = plot_df["标普500(SPY)"].dropna()
+            if len(ss) >= 2 and float(ss.iloc[0]) > 0:
+                spy_p = float(ss.iloc[-1]) / float(ss.iloc[0]) - 1.0
+                cap += f"  ·  SPY {spy_p*100:+.1f}%  ·  超额 {((fund_ret - spy_p)*100):+.1f}pp"
+        cap += f"  ·  {hl}  ·  最大回撤 {dd_min:.1f}%。日线官方收盘，周末不画。"
+        st.caption(cap)
 
 with tab2:
     if not pos_data:
@@ -1089,9 +1135,9 @@ with tab2:
         short_v = df_bar.loc[df_bar["Type"] == "空头", "Value"].sum()
         cash_v = df_bar.loc[df_bar["Ticker"] == "CASH", "Value"].sum()
         e1, e2, e3 = st.columns(3)
-        e1.metric("多头", f"{long_p:.1f}%", f"${long_v:,.0f}")
-        e2.metric("空头", f"{short_p:.1f}%", f"${short_v:,.0f}")
-        e3.metric("现金", f"{cash_p:.1f}%", f"${cash_v:,.0f}")
+        e1.metric("多头", f"{long_p:.1f}%", fmt_money(long_v), delta_color="off")
+        e2.metric("空头", f"{short_p:.1f}%", fmt_money(short_v), delta_color="off")
+        e3.metric("现金", f"{cash_p:.1f}%", fmt_money(cash_v), delta_color="off")
 
         col_w, col_c = st.columns(2)
         with col_w:
@@ -1179,16 +1225,20 @@ with tab2:
         if cost_rows:
             extra = df_cost[["代码", "建仓均价", "现价", "浮盈亏%", "浮盈亏$"]]
             show_tbl = show_tbl.merge(extra, on="代码", how="left")
-        fmt = show_tbl.copy()
-        fmt["数量"] = fmt["数量"].map(lambda v: f"{v:,.0f}")
-        fmt["市值"] = fmt["市值"].map(lambda v: f"${v:,.0f}")
-        fmt["权重%"] = fmt["权重%"].map(lambda v: f"{v:+.1f}%")
-        if "建仓均价" in fmt.columns:
-            fmt["建仓均价"] = fmt["建仓均价"].map(lambda v: f"${v:,.2f}" if pd.notna(v) else "—")
-            fmt["现价"] = fmt["现价"].map(lambda v: f"${v:,.2f}" if pd.notna(v) else "—")
-            fmt["浮盈亏%"] = fmt["浮盈亏%"].map(lambda v: f"{v:+.1f}%" if pd.notna(v) else "—")
-            fmt["浮盈亏$"] = fmt["浮盈亏$"].map(lambda v: f"{v:+,.0f}" if pd.notna(v) else "—")
-        st.dataframe(fmt, use_container_width=True, hide_index=True)
+        st.dataframe(
+            show_tbl,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "数量": st.column_config.NumberColumn(format="%.0f"),
+                "市值": st.column_config.NumberColumn(format="$%.0f"),
+                "权重%": st.column_config.NumberColumn(format="%+.1f%%"),
+                "建仓均价": st.column_config.NumberColumn(format="$%.2f"),
+                "现价": st.column_config.NumberColumn(format="$%.2f"),
+                "浮盈亏%": st.column_config.NumberColumn(format="%+.1f%%"),
+                "浮盈亏$": st.column_config.NumberColumn(format="$%.0f"),
+            },
+        )
 
 with tab3:
     if df_perf_period.empty:
@@ -1204,10 +1254,10 @@ with tab3:
         short_pnl = df_pnl_plot.loc[df_pnl_plot["类型"] == "空头", "总盈亏"].sum()
         closed_pnl = df_pnl_plot.loc[df_pnl_plot["类型"] == "已平仓", "总盈亏"].sum()
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("区间净值", f"{period_ret*100:+.1f}%", f"${period_pnl:,.0f}")
-        m2.metric("多头贡献", f"${long_pnl:,.0f}")
-        m3.metric("空头贡献", f"${short_pnl:,.0f}")
-        m4.metric("已平仓", f"${closed_pnl:,.0f}")
+        m1.metric("区间净值", f"{period_ret*100:+.1f}%", fmt_money(period_pnl), delta_color="off")
+        m2.metric("多头贡献", fmt_money(long_pnl))
+        m3.metric("空头贡献", fmt_money(short_pnl))
+        m4.metric("已平仓", fmt_money(closed_pnl))
 
         eps = max(50.0, abs(start_nav) * 0.0005)
         quiet = df_pnl_plot[df_pnl_plot["总盈亏"].abs() < eps]
@@ -1240,6 +1290,7 @@ with tab3:
             rng = max(abs(float(mx)), abs(float(mn)), 1) * 1.35
             fig_pnl.update_xaxes(range=[-rng, rng], title="区间贡献 $（右侧百分比为占期初净值）")
             apply_chart_style(fig_pnl, height=max(320, len(df_pnl_plot) * 38 + 70), showlegend=False)
+            fig_pnl.update_layout(margin=dict(l=72, r=70, t=16, b=12))
             st.plotly_chart(fig_pnl, use_container_width=True, config={"displayModeBar": False})
             bits = ["柱上百分比是对期初净值的贡献，不是单票资本收益率。"]
             if not quiet.empty:
