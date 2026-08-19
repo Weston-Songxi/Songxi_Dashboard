@@ -180,23 +180,74 @@ def get_price_history(tickers, start_date):
         except Exception:
             return st.session_state.get("_last_price_data", pd.DataFrame())
 
-@st.cache_data(ttl=20, show_spinner=False)
-def get_realtime_price(ticker):
-    if not ticker or ticker == "CASH":
-        return 0.0
+def _positive(x):
     try:
-        tk = yf.Ticker(ticker)
-        # FIX 3: fast_info 是 FastInfo 对象，不同 yfinance 版本 .get() 行为不一致
-        #         改用 getattr 安全访问属性，避免 AttributeError
-        px = getattr(tk.fast_info, "last_price", None)
-        if px and px > 0:
-            return float(px)
-        hist = tk.history(period="1d")
-        if not hist.empty:
-            return float(hist["Close"].iloc[-1])
+        v = float(x)
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def get_anytime_price(ticker):
+    """Anytime fill: extended-hours print if yfinance has one, else last regular close."""
+    if not ticker or ticker == "CASH":
+        return 1.0, "cash"
+    tk = yf.Ticker(ticker)
+    pre = post = last = prev = None
+    try:
+        fi = tk.fast_info
+        last = _positive(getattr(fi, "last_price", None))
+        prev = _positive(getattr(fi, "previous_close", None))
+        pre = _positive(getattr(fi, "pre_market_price", None)) or _positive(getattr(fi, "preMarketPrice", None))
+        post = _positive(getattr(fi, "post_market_price", None)) or _positive(getattr(fi, "postMarketPrice", None))
     except Exception:
         pass
-    return 0.0
+    try:
+        info = tk.info or {}
+        pre = pre or _positive(info.get("preMarketPrice"))
+        post = post or _positive(info.get("postMarketPrice"))
+        last = last or _positive(info.get("regularMarketPrice"))
+        prev = prev or _positive(info.get("regularMarketPreviousClose")) or _positive(info.get("previousClose"))
+    except Exception:
+        pass
+    try:
+        h = tk.history(period="1d", interval="1m", prepost=True, auto_adjust=True)
+        if h is not None and not h.empty:
+            px = _positive(h["Close"].iloc[-1])
+            if px:
+                ts = h.index[-1]
+                try:
+                    hour = ts.tz_convert("America/New_York").hour
+                except Exception:
+                    hour = int(getattr(ts, "hour", 12))
+                if hour < 9 or hour >= 16:
+                    return px, "盘前盘后"
+                return px, "最新"
+    except Exception:
+        pass
+    if pre:
+        return pre, "盘前"
+    if post:
+        return post, "盘后"
+    if last:
+        return last, "最新"
+    if prev:
+        return prev, "昨收"
+    try:
+        h = tk.history(period="5d", auto_adjust=True, prepost=False)
+        if h is not None and not h.empty:
+            px = _positive(h["Close"].iloc[-1])
+            if px:
+                return px, "昨收"
+    except Exception:
+        pass
+    return 0.0, "无行情"
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def get_realtime_price(ticker):
+    px, _src = get_anytime_price(ticker)
+    return px
 
 def calculate_full_history(df_trans, price_data, sys_start_date):
     if df_trans.empty:
@@ -207,10 +258,11 @@ def calculate_full_history(df_trans, price_data, sys_start_date):
     # FIX 8 (配套)：净值曲线的终点与 price_data 保持一致。
     # price_data 已截止到最后一个真实收盘日，这里用它的 max index 作为终点，
     # 确保不会出现「末尾两天净值完全相同」的情况。
-    if not price_data.empty:
-        end_date = price_data.index.max()
-    else:
-        end_date = pd.Timestamp.today().normalize()
+    last_px_day = price_data.index.max() if not price_data.empty else pd.NaT
+    last_tx_day = df_trans["Date_Norm"].max() if not df_trans.empty else pd.NaT
+    today_ts = pd.Timestamp.today().normalize()
+    candidates = [d for d in (last_px_day, last_tx_day, today_ts) if pd.notna(d)]
+    end_date = max(candidates) if candidates else today_ts
     full_dates = pd.date_range(start=sys_start_ts, end=end_date, freq="D")
     past_trans = df_trans[df_trans["Date_Norm"] < sys_start_ts]
     curr_trans = df_trans[df_trans["Date_Norm"] >= sys_start_ts]
@@ -301,15 +353,20 @@ def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_da
         actual_start = actual_end
     holdings_start, _ = daily_snapshots[actual_start]
     holdings_end, cash_end = daily_snapshots[actual_end]
+    last_fill = {}
+    if not df_trans.empty:
+        non_cash = df_trans[df_trans["Ticker"] != "CASH"]
+        for tkr, g in non_cash.groupby("Ticker"):
+            last_fill[tkr] = float(g.sort_values("Date").iloc[-1]["Price"])
     if price_data.empty:
-        return pd.DataFrame(), cash_end
-    price_idx = price_data.index
-    p_start_idx = price_idx[price_idx <= actual_start]
-    p_end_idx = price_idx[price_idx <= actual_end]
-    if p_start_idx.empty or p_end_idx.empty:
-        return pd.DataFrame(), cash_end
-    prices_start = price_data.loc[p_start_idx[-1]]
-    prices_end = price_data.loc[p_end_idx[-1]]
+        prices_start = pd.Series(dtype=float)
+        prices_end = pd.Series(dtype=float)
+    else:
+        price_idx = price_data.index
+        p_start_idx = price_idx[price_idx <= actual_start]
+        p_end_idx = price_idx[price_idx <= actual_end]
+        prices_start = price_data.loc[p_start_idx[-1]] if not p_start_idx.empty else pd.Series(dtype=float)
+        prices_end = price_data.loc[p_end_idx[-1]] if not p_end_idx.empty else pd.Series(dtype=float)
     mask = (df_trans["Date"] > actual_start) & (df_trans["Date"] <= actual_end)
     period_trans = df_trans.loc[mask]
     all_tickers = set(holdings_start.keys()) | set(holdings_end.keys()) | set(period_trans["Ticker"].unique())
@@ -317,8 +374,17 @@ def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_da
         all_tickers.remove("CASH")
     perf_stats = []
     for t in all_tickers:
-        p_s = prices_start.get(t, 0) if isinstance(prices_start, pd.Series) else 0
-        p_e = prices_end.get(t, 0) if isinstance(prices_end, pd.Series) else 0
+        def _px(series, ticker, fallback):
+            if isinstance(series, pd.Series) and ticker in series.index:
+                v = series.get(ticker)
+                if pd.notna(v) and float(v) > 0:
+                    return float(v), False
+            fb = fallback.get(ticker)
+            if fb and float(fb) > 0:
+                return float(fb), True
+            return 0.0, True
+        p_s, _ = _px(prices_start, t, last_fill)
+        p_e, px_stale = _px(prices_end, t, last_fill)
         qty_s = holdings_start.get(t, 0)
         val_s = qty_s * p_s
         qty_e = holdings_end.get(t, 0)
@@ -347,7 +413,8 @@ def calculate_period_attribution(df_trans, price_data, daily_snapshots, start_da
                 "收益率": roi,
                 "当前持仓": qty_e,
                 "当前市值": val_e,
-                "类型": status
+                "类型": status,
+                "价格来源": "昨收/成交价" if px_stale else "行情",
             }
         )
     df_perf = pd.DataFrame(perf_stats)
@@ -458,7 +525,12 @@ else:
 with st.sidebar:
     st.title("🌲 松熙基金工作台")
     if st.button("🔄 刷新数据", use_container_width=True):
-        load_data.clear()  # FIX 5: 精确清除，不影响价格缓存
+        load_data.clear()
+        try:
+            _download_price_history.clear()
+        except Exception:
+            pass
+        st.session_state.pop("_last_price_data", None)
         st.rerun()
     st.divider()
     st.header("📝 交易录入")
@@ -482,17 +554,20 @@ with st.sidebar:
             raw_ticker = st.text_input("代码", "", disabled=("DEPOSIT" in tx_action)).upper().strip()
         tx_ticker = "CASH" if "DEPOSIT" in tx_action else raw_ticker
         current_price = 0.0
+        px_src = ""
         if tx_ticker and tx_ticker != "CASH":
             with st.spinner(f"正在获取 {tx_ticker} 现价..."):
-                current_price = get_realtime_price(tx_ticker)
-        default_price = 1.0 if "DEPOSIT" in tx_action else float(current_price)
+                current_price, px_src = get_anytime_price(tx_ticker)
+        default_price = 1.0 if "DEPOSIT" in tx_action else float(current_price or 0.0)
         tx_price = st.number_input(
             "成交价格",
             min_value=0.0,
-            value=default_price,
+            value=default_price if default_price > 0 else 0.0,
             disabled=("DEPOSIT" in tx_action),
-            help="默认拉取最新价，可手动修改"
+            help="盘前盘后有价用扩展行情，否则用昨收，可手动改"
         )
+        if px_src:
+            st.caption(f"默认价来源：{px_src}")
         if input_mode == "按股数":
             tx_shares_input = st.number_input("交易数量", min_value=0.0, value=100.0)
             if "SELL" in tx_action:
@@ -821,23 +896,32 @@ with tab1:
     with col_pos:
         st.subheader("期末持仓结构")
         if not df_perf_period.empty:
+            stale_names = [
+                r["代码"] for _, r in df_perf_period.iterrows()
+                if r.get("价格来源") == "昨收/成交价" and r.get("类型") != "已平仓"
+            ]
+            if stale_names:
+                st.caption("无实时行情，已用昨收或最近成交价： " + ", ".join(stale_names))
             total_mv = df_perf_period["当前市值"].sum()
             nav_end = cash_period_end + total_mv
             pos_data = []
             for _, row in df_perf_period.iterrows():
-                if abs(row["当前市值"]) > 1 and row["类型"] != "已平仓":
+                open_pos = abs(row.get("当前持仓", 0)) > 0.001
+                if row["类型"] != "已平仓" and (open_pos or abs(row["当前市值"]) > 1):
                     pos_data.append({
                         "Ticker": row["代码"],
                         "Value": row["当前市值"],
                         "Pct": (row["当前市值"] / nav_end) * 100 if nav_end != 0 else 0,
-                        "Type": row["类型"]
+                        "Type": row["类型"],
+                        "PxSrc": row.get("价格来源", "行情"),
                     })
-            if cash_period_end > 1:
+            if abs(cash_period_end) > 0.5:
                 pos_data.append({
                     "Ticker": "CASH",
                     "Value": cash_period_end,
                     "Pct": (cash_period_end / nav_end) * 100 if nav_end != 0 else 0,
-                    "Type": "Cash"
+                    "Type": "Cash",
+                    "PxSrc": "",
                 })
             if pos_data:
                 # 视图切换：持仓权重 | 成本 vs 现价
@@ -875,7 +959,7 @@ with tab1:
                     ))
                     fig_bar.update_layout(
                         height=480, margin=dict(t=40, b=40, l=20, r=20),
-                        xaxis=dict(title=None, tickfont=dict(size=12)),
+                        xaxis=dict(title=None, tickfont=dict(size=12), tickangle=-35),
                         yaxis=dict(title="占净值比例 (%)", showgrid=True, gridcolor="#f0f0f0"),
                         plot_bgcolor="rgba(0,0,0,0)", dragmode=False
                     )
