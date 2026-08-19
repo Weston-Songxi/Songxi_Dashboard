@@ -31,7 +31,7 @@ st.markdown("""
     .block-container {
         padding-top: 1.1rem;
         padding-bottom: 2.4rem;
-        max-width: 1480px;
+        max-width: min(1680px, 100%);
     }
     [data-testid="stSidebar"] {
         background: #fbfbfc;
@@ -75,7 +75,7 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 1.2rem; }
     .stCaption { color: #6b7280 !important; }
     footer { visibility: hidden; }
-    .plotly-notifier { display: none; }
+    .plotly-notifier, .modebar { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -791,16 +791,16 @@ def get_card_style(val):
         return "background-color: #fff;", "#95a5a6", "#95a5a6", "N/A"
     pct = val * 100
     abs_pct = abs(pct)
-    opacity = min(max(abs_pct / 20, 0.1), 1.0)
+    opacity = min(max(abs_pct / 40, 0.06), 0.18)
     if pct > 0:
-        bg = f"rgba(217, 48, 37, {opacity})"
-        txt = "#ffffff" if opacity > 0.5 else "#8B0000"
-        lbl = "#ffffff" if opacity > 0.5 else "#95a5a6"
+        bg = f"rgba(192, 57, 43, {opacity})"
+        txt = "#C0392B"
+        lbl = "#8a9199"
         sign = "+"
     elif pct < 0:
-        bg = f"rgba(24, 128, 56, {opacity})"
-        txt = "#ffffff" if opacity > 0.5 else "#006400"
-        lbl = "#ffffff" if opacity > 0.5 else "#95a5a6"
+        bg = f"rgba(30, 132, 73, {opacity})"
+        txt = "#1E8449"
+        lbl = "#8a9199"
         sign = ""
     else:
         bg = "#ffffff"
@@ -827,7 +827,7 @@ html_parts.append('<div class="header-wrapper">')
 html_parts.append('<div class="header-left">')
 html_parts.append('<h1 class="main-title">松熙 TMT 模拟仓</h1>')
 html_parts.append(
-    f'<div class="sub-info">📅 {date_str} | 💵 净值: {net_assets_str} | {cash_note}: {cash_str} ({cash_pct:+.1f}%) | 成立以来: {incept_str}</div>'
+    f'<div class="sub-info">{date_str}&nbsp;&nbsp;·&nbsp;&nbsp;净值 {net_assets_str}&nbsp;&nbsp;·&nbsp;&nbsp;{cash_note} {cash_str} ({cash_pct:+.1f}%)&nbsp;&nbsp;·&nbsp;&nbsp;成立以来 {incept_str}</div>'
 )
 html_parts.append("</div>")
 html_parts.append('<div class="header-right">')
@@ -841,14 +841,20 @@ st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 # 筛选
 st.write("")
-c_filter_type, c_filter_date = st.columns([3, 4])
+_PERIODS = ["近 1 月", "近 3 月", "近 1 年", "本年至今 (YTD)", "成立至今 (ALL)", "自定义"]
+c_filter_type, c_filter_date = st.columns([3, 2])
 with c_filter_type:
-    time_range = st.radio(
-        "⏱️ 观察周期",
-        ["近 1 月", "近 3 月", "近 1 年", "本年至今 (YTD)", "成立至今 (ALL)", "自定义"],
-        horizontal=True,
-        label_visibility="collapsed"
-    )
+    if hasattr(st, "pills"):
+        time_range = st.pills("观察周期", _PERIODS, default="近 1 月", label_visibility="collapsed")
+        if not time_range:
+            time_range = "近 1 月"
+    else:
+        time_range = st.radio(
+            "观察周期",
+            _PERIODS,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
 today = date.today()
 start_filter = st.session_state["sys_start_date"]
 end_filter = today
@@ -925,13 +931,19 @@ with tab1:
     else:
         c_scale, c_marks, _sp = st.columns([2, 1, 3])
         with c_scale:
-            nav_scale = st.radio(
-                "净值刻度",
-                ["指数 (起点=100)", "美元净值"],
-                horizontal=True,
-                label_visibility="collapsed",
-                key="nav_scale",
-            )
+            _scales = ["指数 (起点=100)", "美元净值"]
+            if hasattr(st, "pills"):
+                nav_scale = st.pills("净值刻度", _scales, default="指数 (起点=100)", label_visibility="collapsed", key="nav_scale")
+                if not nav_scale:
+                    nav_scale = "指数 (起点=100)"
+            else:
+                nav_scale = st.radio(
+                    "净值刻度",
+                    _scales,
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key="nav_scale",
+                )
         with c_marks:
             show_trades = st.checkbox("买卖点", value=False, key="nav_trade_marks")
 
@@ -1059,7 +1071,7 @@ with tab1:
         fig_nav.update_yaxes(title_text=y_title, row=1, col=1)
         fig_nav.update_yaxes(title_text="回撤%", row=2, col=1)
         apply_chart_style(fig_nav, height=520)
-        st.plotly_chart(fig_nav, use_container_width=True)
+        st.plotly_chart(fig_nav, use_container_width=True, config={"displayModeBar": False})
         st.caption("日线用官方收盘，周末不画。盘后成交只进持仓，不改这条曲线。")
 
 with tab2:
@@ -1100,7 +1112,7 @@ with tab2:
             fig_bar.add_vline(x=0, line_width=1, line_color="#1c2430")
             fig_bar.update_xaxes(title="占净值 %", range=[-max(max_abs * 1.35, 8), max(max_abs * 1.35, 8)])
             apply_chart_style(fig_bar, height=max(300, len(df_w) * 38 + 60), showlegend=False)
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, use_container_width=True, config={"displayModeBar": False})
 
         with col_c:
             vwap_costs = calculate_vwap_cost_basis(df_trans)
@@ -1153,7 +1165,7 @@ with tab2:
                 max_abs = float(df_cost["浮盈亏%"].abs().max())
                 fig_cost.update_xaxes(title="浮盈亏 %", range=[-max(max_abs * 1.35, 5), max(max_abs * 1.35, 5)])
                 apply_chart_style(fig_cost, height=max(300, len(cost_rows) * 38 + 60), showlegend=False)
-                st.plotly_chart(fig_cost, use_container_width=True)
+                st.plotly_chart(fig_cost, use_container_width=True, config={"displayModeBar": False})
             else:
                 st.info("暂无可计算成本的持仓")
                 df_cost = pd.DataFrame()
@@ -1196,31 +1208,42 @@ with tab3:
         m3.metric("空头贡献", f"${short_pnl:,.0f}")
         m4.metric("已平仓", f"${closed_pnl:,.0f}")
 
-        df_pnl_plot = df_pnl_plot.sort_values("总盈亏", ascending=True)
-        df_pnl_plot["标签"] = df_pnl_plot.apply(
-            lambda r: f"{r['代码']}  [{'空' if r['类型']=='空头' else ('平' if r['类型']=='已平仓' else '多')}]",
-            axis=1,
-        )
-        colors = [C_LONG if x >= 0 else C_SHORT for x in df_pnl_plot["总盈亏"]]
-        fig_pnl = go.Figure(go.Bar(
-            y=df_pnl_plot["标签"], x=df_pnl_plot["总盈亏"], orientation="h",
-            marker_color=colors, marker_line_width=0,
-            text=[f"${v:,.0f}  {c:+.1f}%" for v, c in zip(df_pnl_plot["总盈亏"], df_pnl_plot["贡献%"])],
-            textposition="outside",
-            textfont=dict(size=12, color="#1c2430"),
-            customdata=np.stack([df_pnl_plot["收益率"], df_pnl_plot["类型"]], axis=1),
-            hovertemplate="<b>%{y}</b> · %{customdata[1]}<br>贡献 $%{x:,.0f}<br>资本收益率 %{customdata[0]:.1f}%<extra></extra>",
-        ))
-        fig_pnl.add_vline(x=0, line_width=1, line_color="#1c2430")
-        mx = df_pnl_plot["总盈亏"].max()
-        mn = df_pnl_plot["总盈亏"].min()
-        if pd.isna(mx):
-            mx = mn = 0
-        rng = max(abs(mx), abs(mn)) * 1.35
-        fig_pnl.update_xaxes(range=[-rng, rng], title="区间贡献 $（右侧百分比为占期初净值）")
-        apply_chart_style(fig_pnl, height=max(400, len(df_pnl_plot) * 38 + 70), showlegend=False)
-        st.plotly_chart(fig_pnl, use_container_width=True)
-        st.caption("柱上百分比是对期初净值的贡献，不是单票资本收益率。悬停看资本收益率。")
+        eps = max(50.0, abs(start_nav) * 0.0005)
+        quiet = df_pnl_plot[df_pnl_plot["总盈亏"].abs() < eps]
+        df_pnl_plot = df_pnl_plot[df_pnl_plot["总盈亏"].abs() >= eps]
+        if df_pnl_plot.empty:
+            st.info("区间内没有超过阈值的盈亏贡献")
+            if not quiet.empty:
+                st.caption("接近零未画柱：" + "、".join(quiet["代码"].astype(str).tolist()))
+        else:
+            df_pnl_plot = df_pnl_plot.sort_values("总盈亏", ascending=True)
+            df_pnl_plot["标签"] = df_pnl_plot.apply(
+                lambda r: f"{r['代码']}  [{'空' if r['类型']=='空头' else ('平' if r['类型']=='已平仓' else '多')}]",
+                axis=1,
+            )
+            colors = [C_LONG if x >= 0 else C_SHORT for x in df_pnl_plot["总盈亏"]]
+            fig_pnl = go.Figure(go.Bar(
+                y=df_pnl_plot["标签"], x=df_pnl_plot["总盈亏"], orientation="h",
+                marker_color=colors, marker_line_width=0,
+                text=[f"${v:,.0f}  {c:+.1f}%" for v, c in zip(df_pnl_plot["总盈亏"], df_pnl_plot["贡献%"])],
+                textposition="outside",
+                textfont=dict(size=12, color="#1c2430"),
+                customdata=np.stack([df_pnl_plot["收益率"], df_pnl_plot["类型"]], axis=1),
+                hovertemplate="<b>%{y}</b> · %{customdata[1]}<br>贡献 $%{x:,.0f}<br>资本收益率 %{customdata[0]:.1f}%<extra></extra>",
+            ))
+            fig_pnl.add_vline(x=0, line_width=1, line_color="#1c2430")
+            mx = df_pnl_plot["总盈亏"].max()
+            mn = df_pnl_plot["总盈亏"].min()
+            if pd.isna(mx):
+                mx = mn = 0
+            rng = max(abs(float(mx)), abs(float(mn)), 1) * 1.35
+            fig_pnl.update_xaxes(range=[-rng, rng], title="区间贡献 $（右侧百分比为占期初净值）")
+            apply_chart_style(fig_pnl, height=max(320, len(df_pnl_plot) * 38 + 70), showlegend=False)
+            st.plotly_chart(fig_pnl, use_container_width=True, config={"displayModeBar": False})
+            bits = ["柱上百分比是对期初净值的贡献，不是单票资本收益率。"]
+            if not quiet.empty:
+                bits.append("接近零未画柱：" + "、".join(quiet["代码"].astype(str).tolist()))
+            st.caption(" ".join(bits))
 
 with tab4:
     c1, c2 = st.columns([1, 3])
