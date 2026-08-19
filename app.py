@@ -4,6 +4,7 @@ import numpy as np
 import yfinance as yf
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
 
@@ -669,10 +670,38 @@ if df_trans.empty:
 
 if not df_nav_full.empty:
     latest = df_nav_full.iloc[-1]
-    net_assets_str = f"${latest['Total Assets']:,.0f}"
+    nav = float(latest["Total Assets"])
+    cash_now = float(latest["Cash"]) if "Cash" in latest.index else 0.0
+    mkt_now = float(latest["Market Value"]) if "Market Value" in latest.index else 0.0
+    net_assets_str = f"${nav:,.0f}"
     date_str = latest.name.strftime("%Y-%m-%d")
-    nav = latest["Total Assets"]
-    net_exp_val = (latest["Market Value"]) / nav * 100 if nav != 0 else 0
+    init_nav = float(df_nav_full["Total Assets"].iloc[0])
+    since_incept = nav - init_nav
+    since_incept_pct = (since_incept / init_nav) if init_nav else 0.0
+    net_exp_val = (mkt_now / nav * 100) if nav != 0 else 0.0
+    cash_pct = (cash_now / nav * 100) if nav != 0 else 0.0
+
+    long_mv = short_mv = 0.0
+    if daily_snapshots:
+        last_d = max(daily_snapshots)
+        h_end, _c = daily_snapshots[last_d]
+        px_row = price_data.iloc[-1] if not price_data.empty else pd.Series(dtype=float)
+        for t, s in h_end.items():
+            if abs(s) < 0.001:
+                continue
+            p = None
+            if isinstance(px_row, pd.Series) and t in px_row.index:
+                raw_p = px_row.get(t)
+                if pd.notna(raw_p) and float(raw_p) > 0:
+                    p = float(raw_p)
+            if p is None:
+                continue
+            mv = s * p
+            if mv >= 0:
+                long_mv += mv
+            else:
+                short_mv += abs(mv)
+    gross_exp_val = ((long_mv + short_mv) / nav * 100) if nav != 0 else 0.0
 
     def get_ret(days):
         target = latest.name - timedelta(days=days)
@@ -686,7 +715,12 @@ if not df_nav_full.empty:
 else:
     net_assets_str = "-"
     date_str = "-"
+    cash_now = 0.0
+    cash_pct = 0.0
     net_exp_val = 0
+    gross_exp_val = 0.0
+    since_incept = 0.0
+    since_incept_pct = 0.0
     rets = {"1W": None, "1M": None, "1Y": None}
 
 def get_card_style(val):
@@ -715,18 +749,27 @@ def get_card_style(val):
 s_1w, c_1w, l_1w, t_1w = get_card_style(rets["1W"])
 s_1m, c_1m, l_1m, t_1m = get_card_style(rets["1M"])
 s_1y, c_1y, l_1y, t_1y = get_card_style(rets["1Y"])
-exp_pct = min(max(net_exp_val, 0), 100)
+exp_pct = min(max(abs(net_exp_val), 0), 100)
 style_exp = f"background: linear-gradient(to top, #e0e0e0 {exp_pct}%, #ffffff {exp_pct}%);"
 color_exp = "#2c3e50"
+gross_fill = min(max(gross_exp_val, 0), 160)
+style_gross = f"background: linear-gradient(to top, #dfe6e9 {min(gross_fill, 100)}%, #ffffff {min(gross_fill, 100)}%);"
+cash_str = f"${cash_now:,.0f}"
+incept_sign = "+" if since_incept >= 0 else ""
+incept_str = f"{incept_sign}${since_incept:,.0f} ({since_incept_pct*100:+.1f}%)"
+cash_note = "杠杆" if cash_now < -0.5 else "现金"
 
 html_parts = []
 html_parts.append('<div class="header-wrapper">')
 html_parts.append('<div class="header-left">')
 html_parts.append('<h1 class="main-title">松熙 TMT 模拟仓</h1>')
-html_parts.append(f'<div class="sub-info">📅 {date_str} | 💵 净值: {net_assets_str}</div>')
+html_parts.append(
+    f'<div class="sub-info">📅 {date_str} | 💵 净值: {net_assets_str} | {cash_note}: {cash_str} ({cash_pct:+.1f}%) | 成立以来: {incept_str}</div>'
+)
 html_parts.append("</div>")
 html_parts.append('<div class="header-right">')
-html_parts.append(f'<div class="kpi-box" style="{style_exp}"><div class="kpi-label" style="color:#6c757d">净多头仓位</div><div class="kpi-value" style="color:{color_exp}">{net_exp_val:.1f}%</div></div>')
+html_parts.append(f'<div class="kpi-box" style="{style_exp}"><div class="kpi-label" style="color:#6c757d">净敞口</div><div class="kpi-value" style="color:{color_exp}">{net_exp_val:.1f}%</div></div>')
+html_parts.append(f'<div class="kpi-box" style="{style_gross}"><div class="kpi-label" style="color:#6c757d">毛敞口</div><div class="kpi-value" style="color:{color_exp}">{gross_exp_val:.1f}%</div></div>')
 html_parts.append(f'<div class="kpi-box" style="{s_1w}"><div class="kpi-label" style="color:{l_1w}">近一周</div><div class="kpi-value" style="color:{c_1w}">{t_1w}</div></div>')
 html_parts.append(f'<div class="kpi-box" style="{s_1m}"><div class="kpi-label" style="color:{l_1m}">近一月</div><div class="kpi-value" style="color:{c_1m}">{t_1m}</div></div>')
 html_parts.append(f'<div class="kpi-box" style="{s_1y}"><div class="kpi-label" style="color:{l_1y}">近一年</div><div class="kpi-value" style="color:{c_1y}">{t_1y}</div></div>')
@@ -786,110 +829,163 @@ with tab1:
     with col_chart:
         st.subheader("净值走势")
         if not df_nav_filtered.empty:
-            start_val = df_nav_filtered["Total Assets"].iloc[0]
-            base = start_val if start_val > 0 else 1
-            plot_df = df_nav_filtered.copy()
-            plot_df["松熙组合"] = plot_df["Total Assets"] / base * 100
+            c_scale, c_marks = st.columns([2, 1])
+            with c_scale:
+                nav_scale = st.radio(
+                    "净值刻度",
+                    ["指数 (起点=100)", "美元净值"],
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key="nav_scale",
+                )
+            with c_marks:
+                show_trades = st.checkbox("买卖点", value=True, key="nav_trade_marks")
 
-            # FIX 2: 用 dropna() 找第一个有效 SPY 价格，避免 NaN 导致整条线消失
+            plot_src = df_nav_filtered.copy()
+            weekday_src = plot_src[plot_src.index.dayofweek < 5]
+            if not weekday_src.empty:
+                plot_src = weekday_src
+
+            start_val = float(plot_src["Total Assets"].iloc[0])
+            base = start_val if start_val > 0 else 1.0
+            plot_df = plot_src.copy()
+            use_index = nav_scale.startswith("指数")
+            if use_index:
+                plot_df["松熙组合"] = plot_df["Total Assets"] / base * 100
+                y_title = "指数"
+            else:
+                plot_df["松熙组合"] = plot_df["Total Assets"]
+                y_title = "美元"
+
             if "SPY" in plot_df.columns:
                 spy_series = plot_df["SPY"].dropna()
                 if not spy_series.empty:
-                    spy_base = spy_series.iloc[0]
-                    plot_df["标普500(SPY)"] = plot_df["SPY"] / (spy_base if spy_base > 0 else 1) * 100
+                    spy_base = float(spy_series.iloc[0])
+                    spy_den = spy_base if spy_base > 0 else 1.0
+                    if use_index:
+                        plot_df["标普500(SPY)"] = plot_df["SPY"] / spy_den * 100
+                    else:
+                        plot_df["标普500(SPY)"] = plot_df["SPY"] / spy_den * start_val
 
-            fig_nav = go.Figure()
+            peak = plot_df["松熙组合"].cummax()
+            dd = (plot_df["松熙组合"] / peak.replace(0, np.nan) - 1.0) * 100
+
+            fig_nav = make_subplots(
+                rows=2, cols=1, shared_xaxes=True,
+                row_heights=[0.78, 0.22],
+                vertical_spacing=0.05,
+            )
             fig_nav.add_trace(go.Scatter(
                 x=plot_df.index, y=plot_df["松熙组合"],
-                name="松熙组合", line=dict(color="#2c3e50", width=2.5)
-            ))
+                name="松熙组合", line=dict(color="#2c3e50", width=2.5),
+            ), row=1, col=1)
             if "标普500(SPY)" in plot_df.columns:
                 fig_nav.add_trace(go.Scatter(
                     x=plot_df.index, y=plot_df["标普500(SPY)"],
-                    name="标普500(SPY)", line=dict(color="#BDC3C7", dash="dot")
-                ))
+                    name="标普500(SPY)", line=dict(color="#BDC3C7", dash="dot"),
+                ), row=1, col=1)
 
-            # 高低点标注
             if not plot_df.empty:
                 max_idx = plot_df["松熙组合"].idxmax()
                 max_val = plot_df.loc[max_idx, "松熙组合"]
-                fig_nav.add_annotation(
-                    x=max_idx, y=max_val, text=f"<b>High: {max_val:.1f}</b>",
-                    showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
-                    arrowcolor="#9B59B6", ax=0, ay=-45,
-                    bgcolor="white", bordercolor="#9B59B6", borderwidth=1, borderpad=4,
-                    font=dict(size=12, color="#9B59B6", family="Arial Black")
-                )
                 min_idx = plot_df["松熙组合"].idxmin()
                 min_val = plot_df.loc[min_idx, "松熙组合"]
+                hi_txt = f"<b>High: {max_val:.1f}</b>" if use_index else f"<b>High: ${max_val:,.0f}</b>"
+                lo_txt = f"<b>Low: {min_val:.1f}</b>" if use_index else f"<b>Low: ${min_val:,.0f}</b>"
                 fig_nav.add_annotation(
-                    x=min_idx, y=min_val, text=f"<b>Low: {min_val:.1f}</b>",
+                    x=max_idx, y=max_val, text=hi_txt,
                     showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
-                    arrowcolor="#E67E22", ax=0, ay=45,
+                    arrowcolor="#9B59B6", ax=0, ay=-40,
+                    bgcolor="white", bordercolor="#9B59B6", borderwidth=1, borderpad=4,
+                    font=dict(size=12, color="#9B59B6", family="Arial Black"),
+                    xref="x", yref="y",
+                )
+                fig_nav.add_annotation(
+                    x=min_idx, y=min_val, text=lo_txt,
+                    showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                    arrowcolor="#E67E22", ax=0, ay=40,
                     bgcolor="white", bordercolor="#E67E22", borderwidth=1, borderpad=4,
-                    font=dict(size=12, color="#E67E22", family="Arial Black")
+                    font=dict(size=12, color="#E67E22", family="Arial Black"),
+                    xref="x", yref="y",
                 )
 
-            # 买卖点标注
             visible_trades = df_trans_filtered[df_trans_filtered["Ticker"] != "CASH"].copy()
-            if not visible_trades.empty:
+            if show_trades and not visible_trades.empty:
                 visible_trades["Date_Norm"] = visible_trades["Date"].dt.normalize()
                 nav_lookup = plot_df["松熙组合"]
+                n_groups = visible_trades["Date_Norm"].nunique()
+                annotate = n_groups <= 8
                 for d, group in visible_trades.groupby("Date_Norm"):
-                    if d in nav_lookup.index:
-                        y_val = nav_lookup.loc[d]
-                        has_buy = any("BUY" in a for a in group["Action"])
-                        has_sell = any("SELL" in a for a in group["Action"])
-                        if has_buy and has_sell:
-                            color = "#FFD700"; symbol = "diamond"; size = 13
-                        elif has_buy:
-                            color = "#E74C3C"; symbol = "square"; size = 11
-                        else:
-                            color = "#2ECC71"; symbol = "square"; size = 11
+                    if d not in nav_lookup.index:
+                        continue
+                    y_val = nav_lookup.loc[d]
+                    has_buy = any("BUY" in a for a in group["Action"])
+                    has_sell = any("SELL" in a for a in group["Action"])
+                    if has_buy and has_sell:
+                        color = "#FFD700"
+                        symbol = "diamond"
+                        size = 13
+                    elif has_buy:
+                        color = "#E74C3C"
+                        symbol = "square"
+                        size = 11
+                    else:
+                        color = "#2ECC71"
+                        symbol = "square"
+                        size = 11
 
-                        card_lines = []
-                        hover_lines = [f"<span style='font-size:16px'><b>📅 {d.strftime('%Y-%m-%d')}</b></span>"]
-                        for _, row in group.iterrows():
-                            txt_color = "#D32F2F" if "BUY" in row["Action"] else "#2E7D32"
-                            line_str = f"<span style='color:{txt_color}'><b>{row['Action'][:3]} {row['Ticker']}</b></span>"
-                            card_lines.append(line_str)
-                            hover_lines.append(
-                                f"{line_str}<br>   💵 ${row['Price'] * abs(row['Shares']):,.0f} | 📝 {row['Reason']}"
-                            )
-                        if len(card_lines) > 3:
-                            card_text = "<br>".join(card_lines[:3]) + f"<br><span style='color:black'>...(+{len(card_lines)-3})</span>"
-                        else:
-                            card_text = "<br>".join(card_lines)
-                        hover_content = "<br>".join(hover_lines)
+                    card_lines = []
+                    hover_lines = [f"<span style='font-size:16px'><b>📅 {d.strftime('%Y-%m-%d')}</b></span>"]
+                    for _, row in group.iterrows():
+                        txt_color = "#D32F2F" if "BUY" in row["Action"] else "#2E7D32"
+                        line_str = f"<span style='color:{txt_color}'><b>{row['Action'][:3]} {row['Ticker']}</b></span>"
+                        card_lines.append(line_str)
+                        hover_lines.append(
+                            f"{line_str}<br>   💵 ${row['Price'] * abs(row['Shares']):,.0f} | 📝 {row['Reason']}"
+                        )
+                    if len(card_lines) > 3:
+                        card_text = "<br>".join(card_lines[:3]) + f"<br><span style='color:black'>...(+{len(card_lines)-3})</span>"
+                    else:
+                        card_text = "<br>".join(card_lines)
+                    hover_content = "<br>".join(hover_lines)
 
-                        fig_nav.add_trace(go.Scatter(
-                            x=[d], y=[y_val], mode="markers", name="Trade",
-                            marker=dict(symbol=symbol, size=size, color=color, line=dict(width=1, color="white")),
-                            showlegend=False, hovertext=hover_content, hoverinfo="text"
-                        ))
+                    fig_nav.add_trace(go.Scatter(
+                        x=[d], y=[y_val], mode="markers", name="Trade",
+                        marker=dict(symbol=symbol, size=size, color=color, line=dict(width=1, color="white")),
+                        showlegend=False, hovertext=hover_content, hoverinfo="text"
+                    ), row=1, col=1)
 
-                        # FIX 7: 卖出标注放在点的下方（ay 为正），买入放上方（ay 为负）
-                        #         混合日（钻石标记）放上方
-                        if has_sell and not has_buy:
-                            ay_offset = 45   # 卖出：标注在点下方
-                        else:
-                            ay_offset = -35  # 买入 / 混合：标注在点上方
-
+                    if annotate:
+                        ay_offset = 45 if (has_sell and not has_buy) else -35
                         fig_nav.add_annotation(
                             x=d, y=y_val, text=card_text,
                             showarrow=True, arrowhead=0, arrowsize=1, arrowwidth=1, arrowcolor=color,
                             ax=0, ay=ay_offset,
                             bgcolor="white", bordercolor=color, borderwidth=1, borderpad=6,
-                            font=dict(size=13, family="Arial Black", color="black"), opacity=0.9
+                            font=dict(size=12, family="Arial Black", color="black"), opacity=0.9,
+                            xref="x", yref="y",
                         )
 
+            fig_nav.add_trace(go.Scatter(
+                x=dd.index, y=dd,
+                name="回撤",
+                fill="tozeroy",
+                line=dict(color="#E67E22", width=1),
+                fillcolor="rgba(230,126,34,0.22)",
+                showlegend=False,
+                hovertemplate="%{x|%Y-%m-%d}<br>回撤: %{y:.1f}%<extra></extra>",
+            ), row=2, col=1)
+
+            fig_nav.update_yaxes(title_text=y_title, row=1, col=1)
+            fig_nav.update_yaxes(title_text="回撤%", row=2, col=1)
             fig_nav.update_layout(
-                height=480, margin=dict(l=20, r=20, t=30, b=20),
-                legend=dict(orientation="h", y=1.02, x=0),
+                height=560, margin=dict(l=20, r=20, t=36, b=16),
+                legend=dict(orientation="h", y=1.08, x=0),
                 hovermode="x unified",
-                hoverlabel=dict(bgcolor="white", font_size=14, font_family="Arial")
+                hoverlabel=dict(bgcolor="white", font_size=13, font_family="Arial"),
             )
             st.plotly_chart(fig_nav, use_container_width=True)
+            st.caption("日线用官方收盘，周末不画（去掉假平台）。盘后成交只进持仓，不改这条曲线。")
         else:
             st.warning("该区间内无净值数据")
 
@@ -914,6 +1010,7 @@ with tab1:
                         "Pct": (row["当前市值"] / nav_end) * 100 if nav_end != 0 else 0,
                         "Type": row["类型"],
                         "PxSrc": row.get("价格来源", "行情"),
+                        "Shares": row.get("当前持仓", 0),
                     })
             if abs(cash_period_end) > 0.5:
                 pos_data.append({
@@ -922,55 +1019,124 @@ with tab1:
                     "Pct": (cash_period_end / nav_end) * 100 if nav_end != 0 else 0,
                     "Type": "Cash",
                     "PxSrc": "",
+                    "Shares": cash_period_end,
                 })
             if pos_data:
-                # 视图切换：持仓权重 | 成本 vs 现价
                 view_mode = st.radio(
                     "视图切换",
-                    ["持仓权重", "成本 vs 现价"],
+                    ["持仓权重", "成本 vs 现价", "敞口结构"],
                     horizontal=True,
                     label_visibility="collapsed",
                     key="holdings_view"
                 )
 
                 if view_mode == "持仓权重":
-                    # ── 原有权重柱状图 ──────────────────────────────
                     df_bar = pd.DataFrame(pos_data)
                     sort_order = st.selectbox(
                         "排序方式",
-                        ["占比从大到小", "占比从小到大", "代码 A-Z"],
+                        ["绝对值从大到小", "占比从大到小", "占比从小到大", "代码 A-Z"],
                         label_visibility="collapsed"
                     )
-                    if sort_order == "占比从大到小":
-                        df_bar = df_bar.sort_values("Pct", ascending=False)
-                    elif sort_order == "占比从小到大":
+                    if sort_order == "绝对值从大到小":
+                        df_bar = df_bar.assign(_abs=df_bar["Pct"].abs()).sort_values("_abs", ascending=True)
+                    elif sort_order == "占比从大到小":
                         df_bar = df_bar.sort_values("Pct", ascending=True)
+                    elif sort_order == "占比从小到大":
+                        df_bar = df_bar.sort_values("Pct", ascending=False)
                     else:
-                        df_bar = df_bar.sort_values("Ticker")
-                    colors = ["#E74C3C" if v > 0 else "#2ECC71" for v in df_bar["Value"]]
+                        df_bar = df_bar.sort_values("Ticker", ascending=False)
+
+                    def _bar_color(r):
+                        if r["Ticker"] == "CASH":
+                            return "#7f8c8d"
+                        return "#E74C3C" if r["Value"] > 0 else "#2ECC71"
+
+                    colors = [_bar_color(r) for _, r in df_bar.iterrows()]
+                    labels = [
+                        f"{'+' if p > 0 else ''}{p:.1f}%"
+                        for p in df_bar["Pct"]
+                    ]
                     fig_bar = go.Figure(go.Bar(
-                        x=df_bar["Ticker"], y=df_bar["Pct"],
-                        text=[f"{'+' if p > 0 else ''}{p:.1f}%" for p in df_bar["Pct"]],
+                        y=df_bar["Ticker"],
+                        x=df_bar["Pct"],
+                        orientation="h",
+                        text=labels,
                         textposition="outside",
                         textfont=dict(family="Arial Black", size=12, color="black"),
-                        marker_color=colors, marker_line_color="black", marker_line_width=1.5,
-                        hovertemplate="<b>%{x}</b><br>市值: $%{customdata:,.0f}<br>占比: %{y:.2f}%<extra></extra>",
-                        customdata=df_bar["Value"]
+                        marker_color=colors,
+                        marker_line_color="black",
+                        marker_line_width=1.2,
+                        customdata=np.stack([df_bar["Value"], df_bar["Type"]], axis=1),
+                        hovertemplate="<b>%{y}</b> (%{customdata[1]})<br>市值: $%{customdata[0]:,.0f}<br>占比: %{x:.2f}%<extra></extra>",
                     ))
+                    max_abs = float(df_bar["Pct"].abs().max()) if not df_bar.empty else 10
+                    buf = max(max_abs * 1.35, 8)
+                    fig_bar.add_vline(x=0, line_width=1.2, line_color="black")
                     fig_bar.update_layout(
-                        height=480, margin=dict(t=40, b=40, l=20, r=20),
-                        xaxis=dict(title=None, tickfont=dict(size=12), tickangle=-35),
-                        yaxis=dict(title="占净值比例 (%)", showgrid=True, gridcolor="#f0f0f0"),
-                        plot_bgcolor="rgba(0,0,0,0)", dragmode=False
+                        height=max(320, len(df_bar) * 42 + 70),
+                        margin=dict(t=20, b=20, l=10, r=70),
+                        xaxis=dict(title="占净值 %", range=[-buf, buf], showgrid=True, gridcolor="#f0f0f0"),
+                        yaxis=dict(title=None, showgrid=False, tickfont=dict(size=13, family="Arial Black")),
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        dragmode=False,
                     )
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                else:
-                    # ── 成本 vs 现价：VWAP 浮盈亏图 + 明细表 ──────────
-                    # 返回值：{ticker: (vwap_price, "多头"|"空头")}
-                    vwap_costs = calculate_vwap_cost_basis(df_trans)
+                    show_tbl = df_bar[["Ticker", "Type", "Shares", "Value", "Pct"]].copy()
+                    show_tbl = show_tbl.rename(columns={
+                        "Ticker": "代码", "Type": "方向", "Shares": "数量",
+                        "Value": "市值", "Pct": "权重%",
+                    })
+                    show_tbl["数量"] = show_tbl["数量"].map(lambda v: f"{v:,.0f}")
+                    show_tbl["市值"] = show_tbl["市值"].map(lambda v: f"${v:,.0f}")
+                    show_tbl["权重%"] = show_tbl["权重%"].map(lambda v: f"{v:+.1f}%")
+                    st.dataframe(show_tbl, use_container_width=True, hide_index=True)
 
-                    # 取 price_data 最后一行作为现价基准
+                elif view_mode == "敞口结构":
+                    df_exp = pd.DataFrame(pos_data)
+                    long_p = df_exp.loc[df_exp["Type"] == "多头", "Pct"].sum()
+                    short_p = df_exp.loc[df_exp["Type"] == "空头", "Pct"].sum()
+                    cash_p = df_exp.loc[df_exp["Ticker"] == "CASH", "Pct"].sum()
+                    long_v = df_exp.loc[df_exp["Type"] == "多头", "Value"].sum()
+                    short_v = df_exp.loc[df_exp["Type"] == "空头", "Value"].sum()
+                    cash_v = df_exp.loc[df_exp["Ticker"] == "CASH", "Value"].sum()
+                    fig_exp = go.Figure()
+                    fig_exp.add_trace(go.Bar(
+                        y=["敞口"], x=[long_p], name="多头",
+                        orientation="h", marker_color="#E74C3C",
+                        text=f"多 {long_p:.1f}%", textposition="inside",
+                        hovertemplate=f"多头 ${long_v:,.0f}<br>{long_p:.1f}%<extra></extra>",
+                    ))
+                    fig_exp.add_trace(go.Bar(
+                        y=["敞口"], x=[short_p], name="空头",
+                        orientation="h", marker_color="#2ECC71",
+                        text=f"空 {short_p:.1f}%", textposition="inside",
+                        hovertemplate=f"空头 ${short_v:,.0f}<br>{short_p:.1f}%<extra></extra>",
+                    ))
+                    fig_exp.add_trace(go.Bar(
+                        y=["敞口"], x=[cash_p], name="现金",
+                        orientation="h", marker_color="#7f8c8d",
+                        text=f"现金 {cash_p:.1f}%", textposition="inside",
+                        hovertemplate=f"现金 ${cash_v:,.0f}<br>{cash_p:.1f}%<extra></extra>",
+                    ))
+                    fig_exp.update_layout(
+                        barmode="relative",
+                        height=180,
+                        margin=dict(t=10, b=10, l=10, r=10),
+                        legend=dict(orientation="h", y=1.25),
+                        xaxis=dict(title="占净值 %", showgrid=True, gridcolor="#f0f0f0", zeroline=True),
+                        yaxis=dict(showticklabels=False),
+                        plot_bgcolor="rgba(0,0,0,0)",
+                    )
+                    st.plotly_chart(fig_exp, use_container_width=True)
+                    e1, e2, e3 = st.columns(3)
+                    e1.metric("多头", f"{long_p:.1f}%", f"${long_v:,.0f}")
+                    e2.metric("空头", f"{short_p:.1f}%", f"${short_v:,.0f}")
+                    e3.metric("现金", f"{cash_p:.1f}%", f"${cash_v:,.0f}")
+                    st.caption("相对堆叠：空头和负现金会画在零轴左侧。")
+
+                else:
+                    vwap_costs = calculate_vwap_cost_basis(df_trans)
                     latest_prices = {}
                     if not price_data.empty:
                         latest_prices = price_data.iloc[-1].dropna().to_dict()
@@ -985,15 +1151,11 @@ with tab1:
                         if not cost_info or not cur_px or cur_px <= 0:
                             continue
                         vwap, direction = cost_info
-
-                        # PnL 方向因多空而异
-                        # 多头：现价 > 成本 → 盈利
-                        # 空头：现价 < 做空均价 → 盈利（方向相反）
                         if direction == "多头":
                             pnl_pct = (cur_px - vwap) / vwap * 100
                             pnl_abs = (cur_px - vwap) * abs(pd_row["Value"] / cur_px)
                             ref_label = "成本均价"
-                        else:  # 空头
+                        else:
                             pnl_pct = (vwap - cur_px) / vwap * 100
                             pnl_abs = (vwap - cur_px) * abs(pd_row["Value"] / cur_px)
                             ref_label = "做空均价"
@@ -1008,23 +1170,19 @@ with tab1:
                             "浮盈亏$":   pnl_abs,
                             "持仓量":    round(abs(pd_row["Value"]) / cur_px, 2),
                             "市值":      pd_row["Value"],
+                            "权重%":     pd_row["Pct"],
                         })
 
                     if cost_rows:
                         df_cost = pd.DataFrame(cost_rows).sort_values("浮盈亏%", ascending=True)
-
-                        # Y 轴标签：代码 + 方向标识（[空] / [多]）
                         df_cost["标签"] = df_cost.apply(
                             lambda r: f"{r['代码']}  [{'空' if r['方向'] == '空头' else '多'}]",
                             axis=1
                         )
-
-                        # 颜色：A 股配色（红涨绿跌），多空方向已在 pnl_pct 中修正
                         bar_colors = [
                             "#E74C3C" if v >= 0 else "#2ECC71"
                             for v in df_cost["浮盈亏%"]
                         ]
-
                         fig_cost = go.Figure(go.Bar(
                             y=df_cost["标签"],
                             x=df_cost["浮盈亏%"],
@@ -1039,12 +1197,13 @@ with tab1:
                             textposition="outside",
                             textfont=dict(family="Arial Black", size=13, color="black"),
                             customdata=df_cost[[
-                                "建仓均价", "现价", "浮盈亏$", "方向", "参考价格"
+                                "建仓均价", "现价", "浮盈亏$", "方向", "参考价格", "权重%"
                             ]].values,
                             hovertemplate=(
                                 "<b>%{y}</b>  (%{customdata[3]})<br>"
                                 "%{customdata[4]}: $%{customdata[0]:,.2f}<br>"
                                 "现价: $%{customdata[1]:,.2f}<br>"
+                                "权重: %{customdata[5]:+.1f}%<br>"
                                 "浮盈亏: %{x:+.1f}%  ($%{customdata[2]:,.0f})"
                                 "<extra></extra>"
                             )
@@ -1068,10 +1227,9 @@ with tab1:
                         )
                         st.plotly_chart(fig_cost, use_container_width=True)
 
-                        # 持仓明细表
                         display_cost = df_cost[[
                             "代码", "方向", "参考价格", "建仓均价",
-                            "现价", "浮盈亏%", "浮盈亏$", "持仓量", "市值"
+                            "现价", "浮盈亏%", "浮盈亏$", "持仓量", "市值", "权重%"
                         ]].copy()
                         display_cost["浮盈亏%"] = display_cost["浮盈亏%"].map(
                             lambda v: f"{'+' if v >= 0 else ''}{v:.1f}%"
@@ -1088,7 +1246,9 @@ with tab1:
                         display_cost["市值"] = display_cost["市值"].map(
                             lambda v: f"${v:,.0f}"
                         )
-                        # 将"参考价格"列合并进列名展示，避免冗余
+                        display_cost["权重%"] = display_cost["权重%"].map(
+                            lambda v: f"{v:+.1f}%"
+                        )
                         display_cost = display_cost.rename(columns={"建仓均价": "建仓均价(VWAP)"})
                         st.dataframe(
                             display_cost,
@@ -1107,14 +1267,35 @@ with tab2:
     if df_perf_period.empty:
         st.info("无数据")
     else:
-        df_pnl_plot = df_perf_period.sort_values("总盈亏", ascending=True)
+        start_nav = float(df_nav_filtered["Total Assets"].iloc[0]) if not df_nav_filtered.empty else 0.0
+        end_nav = float(df_nav_filtered["Total Assets"].iloc[-1]) if not df_nav_filtered.empty else 0.0
+        period_pnl = end_nav - start_nav
+        period_ret = (period_pnl / start_nav) if start_nav else 0.0
+        df_pnl_plot = df_perf_period.copy()
+        df_pnl_plot["贡献%"] = df_pnl_plot["总盈亏"] / start_nav * 100 if start_nav else 0.0
+        long_pnl = df_pnl_plot.loc[df_pnl_plot["类型"] == "多头", "总盈亏"].sum()
+        short_pnl = df_pnl_plot.loc[df_pnl_plot["类型"] == "空头", "总盈亏"].sum()
+        closed_pnl = df_pnl_plot.loc[df_pnl_plot["类型"] == "已平仓", "总盈亏"].sum()
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("区间净值", f"{period_ret*100:+.1f}%", f"${period_pnl:,.0f}")
+        m2.metric("多头贡献", f"${long_pnl:,.0f}")
+        m3.metric("空头贡献", f"${short_pnl:,.0f}")
+        m4.metric("已平仓", f"${closed_pnl:,.0f}")
+
+        df_pnl_plot = df_pnl_plot.sort_values("总盈亏", ascending=True)
+        df_pnl_plot["标签"] = df_pnl_plot.apply(
+            lambda r: f"{r['代码']}  [{'空' if r['类型']=='空头' else ('平' if r['类型']=='已平仓' else '多')}]",
+            axis=1,
+        )
         colors = ["#E74C3C" if x >= 0 else "#2ECC71" for x in df_pnl_plot["总盈亏"]]
         fig_pnl = go.Figure(go.Bar(
-            y=df_pnl_plot["代码"], x=df_pnl_plot["总盈亏"], orientation="h",
+            y=df_pnl_plot["标签"], x=df_pnl_plot["总盈亏"], orientation="h",
             marker_color=colors, marker_line_color="black", marker_line_width=1, opacity=1.0,
-            text=[f"${v:,.0f} ({r:.1f}%)" for v, r in zip(df_pnl_plot["总盈亏"], df_pnl_plot["收益率"])],
+            text=[f"${v:,.0f} ({c:+.1f}%)" for v, c in zip(df_pnl_plot["总盈亏"], df_pnl_plot["贡献%"])],
             textposition="outside",
-            textfont=dict(family="Arial", size=14, color="black")
+            textfont=dict(family="Arial", size=13, color="black"),
+            customdata=np.stack([df_pnl_plot["收益率"], df_pnl_plot["类型"]], axis=1),
+            hovertemplate="<b>%{y}</b> (%{customdata[1]})<br>贡献: $%{x:,.0f}<br>资本收益率: %{customdata[0]:.1f}%<extra></extra>",
         ))
         fig_pnl.add_vline(x=0, line_width=1.5, line_color="black")
         mx = df_pnl_plot["总盈亏"].max()
@@ -1122,15 +1303,17 @@ with tab2:
         if pd.isna(mx):
             mx = 0
             mn = 0
-        range_buffer = max(abs(mx), abs(mn)) * 1.3
+        range_buffer = max(abs(mx), abs(mn)) * 1.35
         fig_pnl.update_layout(
             xaxis_range=[-range_buffer, range_buffer],
-            height=600, showlegend=False,
+            height=max(420, len(df_pnl_plot) * 36 + 80),
+            showlegend=False,
             plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(showgrid=True, gridcolor="#f0f0f0"),
-            yaxis=dict(showgrid=False, tickfont=dict(size=15, color="black", family="Arial Black"))
+            xaxis=dict(showgrid=True, gridcolor="#f0f0f0", title="区间贡献 $（括号内为占期初净值）"),
+            yaxis=dict(showgrid=False, tickfont=dict(size=14, color="black", family="Arial Black"))
         )
         st.plotly_chart(fig_pnl, use_container_width=True)
+        st.caption("柱上括号是对期初净值的贡献，不是单票资本收益率。悬停看资本收益率。")
 
 with tab3:
     st.subheader("区间调仓记录")
