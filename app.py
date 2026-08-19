@@ -811,7 +811,7 @@ def get_card_style(val):
 
 s_1w, c_1w, l_1w, t_1w = get_card_style(rets["1W"])
 s_1m, c_1m, l_1m, t_1m = get_card_style(rets["1M"])
-s_1y, c_1y, l_1y, t_1y = get_card_style(rets["1Y"])
+s_si, c_si, l_si, t_si = get_card_style(since_incept_pct)
 exp_pct = min(max(abs(net_exp_val), 0), 100)
 style_exp = f"background: linear-gradient(to top, #e0e0e0 {exp_pct}%, #ffffff {exp_pct}%);"
 color_exp = "#2c3e50"
@@ -827,7 +827,7 @@ html_parts.append('<div class="header-wrapper">')
 html_parts.append('<div class="header-left">')
 html_parts.append('<h1 class="main-title">松熙 TMT 模拟仓</h1>')
 html_parts.append(
-    f'<div class="sub-info">{date_str}&nbsp;&nbsp;·&nbsp;&nbsp;净值 {net_assets_str}&nbsp;&nbsp;·&nbsp;&nbsp;{cash_note} {cash_str} ({cash_pct:+.1f}%)&nbsp;&nbsp;·&nbsp;&nbsp;成立以来 {incept_str}</div>'
+    f'<div class="sub-info">{date_str}&nbsp;&nbsp;·&nbsp;&nbsp;净值 {net_assets_str}&nbsp;&nbsp;·&nbsp;&nbsp;{cash_note} {cash_str} ({cash_pct:+.1f}%)</div>'
 )
 html_parts.append("</div>")
 html_parts.append('<div class="header-right">')
@@ -835,7 +835,7 @@ html_parts.append(f'<div class="kpi-box" style="{style_exp}"><div class="kpi-lab
 html_parts.append(f'<div class="kpi-box" style="{style_gross}"><div class="kpi-label" style="color:#6c757d">毛敞口</div><div class="kpi-value" style="color:{color_exp}">{gross_exp_val:.1f}%</div></div>')
 html_parts.append(f'<div class="kpi-box" style="{s_1w}"><div class="kpi-label" style="color:{l_1w}">近一周</div><div class="kpi-value" style="color:{c_1w}">{t_1w}</div></div>')
 html_parts.append(f'<div class="kpi-box" style="{s_1m}"><div class="kpi-label" style="color:{l_1m}">近一月</div><div class="kpi-value" style="color:{c_1m}">{t_1m}</div></div>')
-html_parts.append(f'<div class="kpi-box" style="{s_1y}"><div class="kpi-label" style="color:{l_1y}">近一年</div><div class="kpi-value" style="color:{c_1y}">{t_1y}</div></div>')
+html_parts.append(f'<div class="kpi-box" style="{s_si}"><div class="kpi-label" style="color:{l_si}">成立以来</div><div class="kpi-value" style="color:{c_si}">{t_si}</div></div>')
 html_parts.append("</div></div>")
 st.markdown("".join(html_parts), unsafe_allow_html=True)
 
@@ -933,13 +933,14 @@ with tab1:
         with c_scale:
             _scales = ["指数 (起点=100)", "美元净值"]
             if hasattr(st, "pills"):
-                nav_scale = st.pills("净值刻度", _scales, default="指数 (起点=100)", label_visibility="collapsed", key="nav_scale")
+                nav_scale = st.pills("净值刻度", _scales, default="美元净值", label_visibility="collapsed", key="nav_scale")
                 if not nav_scale:
-                    nav_scale = "指数 (起点=100)"
+                    nav_scale = "美元净值"
             else:
                 nav_scale = st.radio(
                     "净值刻度",
                     _scales,
+                    index=1,
                     horizontal=True,
                     label_visibility="collapsed",
                     key="nav_scale",
@@ -1267,9 +1268,40 @@ with tab4:
         else:
             display_df = target_df.sort_values(["Ticker", "Date"], ascending=[True, False])
         display_df = display_df.copy()
-        display_df["Date"] = display_df["Date"].dt.strftime("%Y-%m-%d")
+        act_map = {"BUY": "买入", "SELL": "卖出", "DEPOSIT": "入金"}
+        show = pd.DataFrame({
+            "日期": display_df["Date"].dt.strftime("%Y-%m-%d"),
+            "代码": display_df["Ticker"],
+            "动作": display_df["Action"].map(lambda a: act_map.get(str(a), str(a))),
+            "数量": display_df["Shares"].astype(float),
+            "价格": display_df["Price"].astype(float),
+            "金额": display_df["Shares"].astype(float) * display_df["Price"].astype(float),
+            "逻辑": display_df["Reason"].fillna("").astype(str),
+        })
+
+        def _style_action(col):
+            colors = []
+            for v in col:
+                if v == "买入":
+                    colors.append("color: #C0392B; font-weight: 600")
+                elif v == "卖出":
+                    colors.append("color: #1E8449; font-weight: 600")
+                else:
+                    colors.append("color: #6B7280")
+            return colors
+
+        styled = show.style.apply(_style_action, subset=["动作"]).format({
+            "数量": "{:,.0f}",
+            "价格": "${:,.2f}",
+            "金额": "${:,.0f}",
+        })
         st.dataframe(
-            display_df[["Date", "Ticker", "Action", "Shares", "Price", "Reason"]],
+            styled,
             use_container_width=True,
             hide_index=True,
+            column_config={
+                "逻辑": st.column_config.TextColumn("逻辑", width="large"),
+                "代码": st.column_config.TextColumn("代码", width="small"),
+                "动作": st.column_config.TextColumn("动作", width="small"),
+            },
         )
