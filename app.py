@@ -19,77 +19,109 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. CSS 样式 (不隐藏系统菜单)
+# 2. CSS — Claude-like warm cream UI
 # ==========================================
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap');
+
     html, body, [class*="css"] {
-        font-family: "IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC",
-                     "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+        font-family: Inter, "PingFang SC", "Noto Sans SC", "Source Han Sans SC",
+                     "Helvetica Neue", Arial, sans-serif;
     }
-    .stApp { background: #f4f5f7; }
+    .stApp { background: #F5F4EF; color: #141413; }
     .block-container {
-        padding-top: 0.7rem;
-        padding-bottom: 2rem;
-        max-width: min(1680px, 100%);
+        padding-top: 1.2rem;
+        padding-bottom: 2.8rem;
+        max-width: min(1180px, 100%);
     }
     [data-testid="stSidebar"] {
-        background: #fbfbfc;
-        border-right: 1px solid #e6e8ec;
+        background: #FAF9F5;
+        border-right: 1px solid #E8E6DC;
     }
-    [data-testid="stSidebar"] h1 { font-size: 1.15rem !important; letter-spacing: 0.02em; }
-    [data-testid="stSidebar"] h2 { font-size: 0.95rem !important; color: #1f3a4d; }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+    [data-testid="stSidebar"] label { color: #3d3d3a; }
     .header-wrapper {
-        display: flex; flex-direction: row; align-items: center; justify-content: space-between;
-        flex-wrap: wrap; gap: 18px 28px; width: 100%; margin-bottom: 6px;
-        border-bottom: 1px solid #e6e8ec; padding-bottom: 10px;
+        display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between;
+        flex-wrap: wrap; gap: 20px 32px; width: 100%; margin-bottom: 8px;
+        border-bottom: 1px solid #E8E6DC; padding-bottom: 18px;
     }
     .header-left { flex-shrink: 0; max-width: 100%; }
     .main-title {
-        font-size: 1.7rem; font-weight: 720; color: #1c2430; margin: 0; line-height: 1.15;
-        letter-spacing: -0.02em; white-space: nowrap;
+        font-family: "Source Serif 4", "Songti SC", "Noto Serif SC", Georgia, serif;
+        font-size: 2rem; font-weight: 560; color: #141413; margin: 0; line-height: 1.2;
+        letter-spacing: -0.01em; white-space: nowrap;
     }
-    @media (max-width: 800px) { .main-title { white-space: normal; font-size: 1.35rem; } }
-    .sub-info { font-size: 0.82rem; color: #6b7280; margin-top: 6px; font-weight: 400; line-height: 1.45; }
-    .header-right { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    @media (max-width: 800px) { .main-title { white-space: normal; font-size: 1.55rem; } }
+    .sub-info {
+        font-size: 0.88rem; color: #73726c; margin-top: 8px; font-weight: 400; line-height: 1.5;
+    }
+    .header-right { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .kpi-box {
-        border: 1px solid #e6e8ec; border-radius: 10px; padding: 0 14px; min-width: 88px; height: 62px;
+        border: 1px solid #E8E6DC; border-radius: 14px; padding: 0 16px; min-width: 96px; height: 68px;
         display: flex; flex-direction: column; justify-content: center; align-items: center;
-        background: #fff; box-shadow: 0 1px 2px rgba(28,36,48,0.04); position: relative; overflow: hidden;
+        background: #FAF9F5; box-shadow: none; position: relative; overflow: hidden;
     }
-    .kpi-label { font-size: 0.7rem; margin-bottom: 2px; font-weight: 600; letter-spacing: 0.04em; z-index: 2; text-transform: uppercase; }
-    .kpi-value { font-size: 1.15rem; font-weight: 700; line-height: 1.1; white-space: nowrap; z-index: 2; }
+    .kpi-label {
+        font-size: 0.68rem; margin-bottom: 4px; font-weight: 500; letter-spacing: 0.06em;
+        z-index: 2; text-transform: uppercase; color: #73726c !important;
+    }
+    .kpi-value {
+        font-size: 1.2rem; font-weight: 600; line-height: 1.1; white-space: nowrap; z-index: 2;
+        font-variant-numeric: tabular-nums;
+    }
     div.stRadio > div { display: flex; gap: 2px; align-items: center; flex-wrap: wrap; }
     div.stRadio > div label { margin-right: 10px; cursor: pointer; }
     .stTabs [data-baseweb="tab-list"] {
-        gap: 4px; border-bottom: 1px solid #e6e8ec;
+        gap: 2px; border-bottom: 1px solid #E8E6DC; background: transparent;
     }
     .stTabs [data-baseweb="tab"] {
-        padding: 8px 14px; font-weight: 600; color: #6b7280;
+        padding: 10px 16px; font-weight: 500; color: #73726c; background: transparent;
     }
-    .stTabs [aria-selected="true"] { color: #1f3a4d !important; }
+    .stTabs [aria-selected="true"] {
+        color: #141413 !important;
+        border-bottom: 2px solid #D97757 !important;
+    }
     [data-testid="stMetric"] {
-        background: #fff; border: 1px solid #e6e8ec; border-radius: 10px;
-        padding: 10px 14px;
+        background: #FAF9F5; border: 1px solid #E8E6DC; border-radius: 14px;
+        padding: 14px 16px;
     }
-    [data-testid="stMetricValue"] { font-size: 1.2rem; }
-    .stCaption { color: #6b7280 !important; }
+    [data-testid="stMetricLabel"] { color: #73726c; font-weight: 500; }
+    [data-testid="stMetricValue"] { font-size: 1.25rem; font-weight: 600; color: #141413; }
+    .stCaption { color: #73726c !important; }
+    div[data-testid="stExpander"] {
+        background: #FAF9F5; border: 1px solid #E8E6DC; border-radius: 12px;
+    }
+    .stButton > button[kind="primary"],
+    .stButton > button[data-testid="baseButton-primary"] {
+        background: #D97757 !important; border-color: #D97757 !important; color: #fff !important;
+        border-radius: 10px; font-weight: 560;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background: #C46648 !important; border-color: #C46648 !important;
+    }
+    .stButton > button {
+        border-radius: 10px; border-color: #E8E6DC; background: #FAF9F5; color: #141413;
+    }
+    [data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div {
+        border-radius: 10px !important; background: #fff !important;
+    }
     footer { visibility: hidden; }
     .plotly-notifier, .modebar { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
 
 CHART_FONT = dict(
-    family="IBM Plex Sans, Source Han Sans SC, Noto Sans SC, Helvetica Neue, Arial, sans-serif",
+    family="Inter, PingFang SC, Noto Sans SC, Helvetica Neue, Arial, sans-serif",
     size=12,
-    color="#1c2430",
+    color="#141413",
 )
-C_LONG = "#C0392B"
-C_SHORT = "#1E8449"
-C_CASH = "#6B7280"
-C_NAV = "#1F3A4D"
-C_SPY = "#9AA3AD"
-C_DD = "#C47A2C"
+C_LONG = "#C45C4A"
+C_SHORT = "#3D8B6E"
+C_CASH = "#8A8980"
+C_NAV = "#141413"
+C_SPY = "#A8A59A"
+C_DD = "#D97757"
 
 
 def fmt_money(v, digits=0):
@@ -108,23 +140,23 @@ def apply_chart_style(fig, height=420, showlegend=True):
         height=height,
         font=CHART_FONT,
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#ffffff",
+        plot_bgcolor="#FAF9F5",
         margin=dict(l=16, r=18, t=24, b=12),
         showlegend=showlegend,
         legend=dict(
             orientation="h", y=1.08, x=0, bgcolor="rgba(0,0,0,0)",
-            font=dict(size=12, color="#4b5563"),
+            font=dict(size=12, color="#73726c"),
         ),
         hovermode="x unified",
         hoverlabel=dict(
             bgcolor="#ffffff",
             font_size=12,
             font_family=CHART_FONT["family"],
-            bordercolor="#e6e8ec",
+            bordercolor="#E8E6DC",
         ),
     )
-    fig.update_xaxes(showgrid=False, zeroline=False, linecolor="#e6e8ec", tickfont=dict(size=11, color="#6b7280"))
-    fig.update_yaxes(showgrid=True, gridcolor="#f0f2f5", zeroline=False, linecolor="#e6e8ec", tickfont=dict(size=11, color="#6b7280"))
+    fig.update_xaxes(showgrid=False, zeroline=False, linecolor="#E8E6DC", tickfont=dict(size=11, color="#6b7280"))
+    fig.update_yaxes(showgrid=True, gridcolor="#EFEDE6", zeroline=False, linecolor="#E8E6DC", tickfont=dict(size=11, color="#6b7280"))
     return fig
 
 # ==========================================
@@ -597,8 +629,8 @@ else:
 # 6. 侧边栏：支持比例下单与预览
 # ==========================================
 with st.sidebar:
-    st.markdown("##### 松熙 · 工作台")
-    st.caption("模拟仓录入与刷新")
+    st.markdown('<p style="font-family:Source Serif 4,Georgia,serif;font-size:1.15rem;font-weight:560;margin:0 0 2px 0;color:#141413;">松熙 · 工作台</p>', unsafe_allow_html=True)
+    st.caption("录入 · 刷新 · 仓位摘要")
     if st.button("刷新数据", use_container_width=True):
         load_data.clear()
         try:
@@ -836,14 +868,14 @@ def get_card_style(val):
     abs_pct = abs(pct)
     opacity = min(max(abs_pct / 40, 0.06), 0.18)
     if pct > 0:
-        bg = f"rgba(192, 57, 43, {opacity})"
-        txt = "#C0392B"
-        lbl = "#8a9199"
+        bg = f"rgba(196, 92, 74, {opacity})"
+        txt = "#C45C4A"
+        lbl = "#73726c"
         sign = "+"
     elif pct < 0:
-        bg = f"rgba(30, 132, 73, {opacity})"
-        txt = "#1E8449"
-        lbl = "#8a9199"
+        bg = f"rgba(61, 139, 110, {opacity})"
+        txt = "#3D8B6E"
+        lbl = "#73726c"
         sign = ""
     else:
         bg = "#ffffff"
@@ -856,10 +888,10 @@ s_1w, c_1w, l_1w, t_1w = get_card_style(rets["1W"])
 s_1m, c_1m, l_1m, t_1m = get_card_style(rets["1M"])
 s_si, c_si, l_si, t_si = get_card_style(since_incept_pct)
 exp_pct = min(max(abs(net_exp_val), 0), 100)
-style_exp = f"background: linear-gradient(to top, #e0e0e0 {exp_pct}%, #ffffff {exp_pct}%);"
-color_exp = "#2c3e50"
+style_exp = f"background: linear-gradient(to top, #E8E6DC {exp_pct}%, #FAF9F5 {exp_pct}%);"
+color_exp = "#141413"
 gross_fill = min(max(gross_exp_val, 0), 160)
-style_gross = f"background: linear-gradient(to top, #dfe6e9 {min(gross_fill, 100)}%, #ffffff {min(gross_fill, 100)}%);"
+style_gross = f"background: linear-gradient(to top, #E8E6DC {min(gross_fill, 100)}%, #FAF9F5 {min(gross_fill, 100)}%);"
 cash_str = fmt_money(cash_now)
 incept_sign = "+" if since_incept >= 0 else ""
 incept_str = f"{fmt_money(since_incept)} ({since_incept_pct*100:+.1f}%)"
@@ -881,8 +913,8 @@ html_parts.append(
 )
 html_parts.append("</div>")
 html_parts.append('<div class="header-right">')
-html_parts.append(f'<div class="kpi-box" style="{style_exp}"><div class="kpi-label" style="color:#6c757d">净敞口</div><div class="kpi-value" style="color:{color_exp}">{net_exp_val:.1f}%</div></div>')
-html_parts.append(f'<div class="kpi-box" style="{style_gross}"><div class="kpi-label" style="color:#6c757d">毛敞口</div><div class="kpi-value" style="color:{color_exp}">{gross_exp_val:.1f}%</div></div>')
+html_parts.append(f'<div class="kpi-box" style="{style_exp}"><div class="kpi-label" style="color:#73726c">净敞口</div><div class="kpi-value" style="color:{color_exp}">{net_exp_val:.1f}%</div></div>')
+html_parts.append(f'<div class="kpi-box" style="{style_gross}"><div class="kpi-label" style="color:#73726c">毛敞口</div><div class="kpi-value" style="color:{color_exp}">{gross_exp_val:.1f}%</div></div>')
 html_parts.append(f'<div class="kpi-box" style="{s_1w}"><div class="kpi-label" style="color:{l_1w}">近一周</div><div class="kpi-value" style="color:{c_1w}">{t_1w}</div></div>')
 html_parts.append(f'<div class="kpi-box" style="{s_1m}"><div class="kpi-label" style="color:{l_1m}">近一月</div><div class="kpi-value" style="color:{c_1m}">{t_1m}</div></div>')
 html_parts.append(f'<div class="kpi-box" style="{s_si}"><div class="kpi-label" style="color:{l_si}">成立以来</div><div class="kpi-value" style="color:{c_si}">{t_si}</div></div>')
